@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use thiserror::Error;
+use url::ParseError;
 
 // ----------------------------------------------------------------
 // Common
@@ -19,6 +20,11 @@ pub struct IssueResponse<F = Value> {
 
 #[derive(Debug, Error)]
 pub enum JiraError {
+    #[error("while building Jira URL: {source}")]
+    BuildUrl {
+        #[source]
+        source: ParseError,
+    },
     #[error("while building HTTP request: {source}")]
     BuildRequest {
         #[source]

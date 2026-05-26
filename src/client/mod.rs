@@ -1,6 +1,7 @@
 use crate::client::types::{JiraError, SearchIssuesRequest, SearchIssuesResponse};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
+use url::Url;
 
 pub mod types;
 
@@ -10,7 +11,7 @@ pub struct JiraClient {
 }
 
 pub struct JiraClientConfig {
-    pub base_url: String,
+    pub base_url: Url,
     pub auth: JiraAuth,
 }
 
@@ -56,10 +57,14 @@ impl JiraClient {
         Request: Serialize,
         Response: DeserializeOwned,
     {
-        let url = format!("{}{}", self.config.base_url, path);
+        let url = self
+            .config
+            .base_url
+            .join(path)
+            .map_err(|source| JiraError::BuildUrl { source })?;
         let mut builder = ureq::http::Request::builder()
             .method(method)
-            .uri(&url)
+            .uri(url.as_str())
             .header("Accept", "application/json")
             .header("Authorization", self.authorization_header());
 

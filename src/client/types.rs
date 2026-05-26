@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::fmt;
+use thiserror::Error;
 
 // ----------------------------------------------------------------
 // Common
@@ -17,26 +17,36 @@ pub struct IssueResponse<F = Value> {
     pub fields: F,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum JiraError {
-    Http(String),
+    #[error("while building HTTP request: {source}")]
+    BuildRequest {
+        #[source]
+        source: ureq::http::Error,
+    },
+    #[error("while encoding Jira request body: {source}")]
+    EncodeRequestBody {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("while sending HTTP request: {source}")]
+    Transport {
+        #[source]
+        source: ureq::Error,
+    },
+    #[error("jira returned HTTP {status}: {body}")]
     HttpStatus { status: u16, body: String },
-    Json(String),
+    #[error("while reading Jira response body: {source}")]
+    ReadResponseBody {
+        #[source]
+        source: ureq::Error,
+    },
+    #[error("while decoding Jira response: {source}")]
+    DecodeResponse {
+        #[source]
+        source: serde_json::Error,
+    },
 }
-
-impl fmt::Display for JiraError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            JiraError::Http(message) => write!(f, "http error: {message}"),
-            JiraError::HttpStatus { status, body } => {
-                write!(f, "jira returned HTTP {status}: {body}")
-            }
-            JiraError::Json(message) => write!(f, "json error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for JiraError {}
 
 // ----------------------------------------------------------------
 // Search Issues

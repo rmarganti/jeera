@@ -1,6 +1,7 @@
 use crate::cli::SearchArgs;
 use crate::client::types::SearchIssuesResponse;
 use crate::client::{JiraClient, types::SearchIssuesRequest};
+use crate::error::AppError;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -30,7 +31,7 @@ pub struct SearchIssueFields {
     pub components: Vec<IssueComponent>,
 }
 
-pub fn run(client: &JiraClient, _args: &SearchArgs) {
+pub fn run(client: &JiraClient, _args: &SearchArgs) -> Result<(), AppError> {
     let request = SearchIssuesRequest {
         jql: "assignee = currentUser() ORDER BY updated DESC".to_string(),
         max_results: Some(5),
@@ -42,10 +43,12 @@ pub fn run(client: &JiraClient, _args: &SearchArgs) {
         ..Default::default()
     };
 
-    match client.search_issues::<SearchIssueFields>(&request) {
-        Ok(response) => print_results(response),
-        Err(error) => eprintln!("Search failed: {error}"),
-    }
+    let response = client
+        .search_issues::<SearchIssueFields>(&request)
+        .map_err(|source| AppError::ExecuteSearch { source })?;
+
+    print_results(response);
+    Ok(())
 }
 
 fn print_results(response: SearchIssuesResponse<SearchIssueFields>) {

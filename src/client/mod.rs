@@ -66,22 +66,22 @@ impl JiraClient {
         let response = match body {
             Some(payload) => {
                 let payload = serde_json::to_vec(payload)
-                    .map_err(|error| JiraError::Json(error.to_string()))?;
+                    .map_err(|source| JiraError::EncodeRequestBody { source })?;
                 builder = builder.header("Content-Type", "application/json");
                 let request = builder
                     .body(payload)
-                    .map_err(|error| JiraError::Http(error.to_string()))?;
+                    .map_err(|source| JiraError::BuildRequest { source })?;
                 self.http
                     .run(request)
-                    .map_err(|error| JiraError::Http(error.to_string()))?
+                    .map_err(|source| JiraError::Transport { source })?
             }
             None => {
                 let request = builder
                     .body(())
-                    .map_err(|error| JiraError::Http(error.to_string()))?;
+                    .map_err(|source| JiraError::BuildRequest { source })?;
                 self.http
                     .run(request)
-                    .map_err(|error| JiraError::Http(error.to_string()))?
+                    .map_err(|source| JiraError::Transport { source })?
             }
         };
 
@@ -89,13 +89,13 @@ impl JiraClient {
         let body = response
             .into_body()
             .read_to_string()
-            .map_err(|error| JiraError::Http(error.to_string()))?;
+            .map_err(|source| JiraError::ReadResponseBody { source })?;
 
         if !(200..300).contains(&status) {
             return Err(JiraError::HttpStatus { status, body });
         }
 
-        serde_json::from_str(&body).map_err(|error| JiraError::Json(error.to_string()))
+        serde_json::from_str(&body).map_err(|source| JiraError::DecodeResponse { source })
     }
 
     fn authorization_header(&self) -> String {

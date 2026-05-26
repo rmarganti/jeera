@@ -2,9 +2,9 @@ use crate::client::JiraAuth;
 use crate::client::JiraClientConfig;
 use serde::Deserialize;
 use std::env;
-use std::fmt;
 use std::fs;
 use std::path::PathBuf;
+use thiserror::Error;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
@@ -19,43 +19,33 @@ pub enum AuthSettings {
     Bearer { token: String },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("could not determine the home directory")]
     HomeDirectoryNotFound,
-    ReadFailed { path: PathBuf, message: String },
-    ParseFailed { path: PathBuf, message: String },
+    #[error("failed to read {path}: {source}", path = .path.display())]
+    ReadFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse {path}: {source}", path = .path.display())]
+    ParseFailed {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
 }
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConfigError::HomeDirectoryNotFound => {
-                write!(f, "could not determine the home directory")
-            }
-            ConfigError::ReadFailed { path, message } => {
-                write!(f, "failed to read {}: {message}", path.display())
-            }
-            ConfigError::ParseFailed { path, message } => {
-                write!(f, "failed to parse {}: {message}", path.display())
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 impl Settings {
     pub fn load() -> Result<Self, ConfigError> {
         let path = settings_path()?;
-        let raw = fs::read_to_string(&path).map_err(|error| ConfigError::ReadFailed {
+        let raw = fs::read_to_string(&path).map_err(|source| ConfigError::ReadFailed {
             path: path.clone(),
-            message: error.to_string(),
+            source,
         })?;
 
-        serde_json::from_str(&raw).map_err(|error| ConfigError::ParseFailed {
-            path,
-            message: error.to_string(),
-        })
+        serde_json::from_str(&raw).map_err(|source| ConfigError::ParseFailed { path, source })
     }
 
     pub fn into_jira_client_config(self) -> JiraClientConfig {

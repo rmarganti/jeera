@@ -1,4 +1,3 @@
-use crate::core::IssueSummary;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -7,6 +6,16 @@ use std::fmt;
 // ----------------------------------------------------------------
 // Common
 // ----------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "F: Deserialize<'de>"))]
+pub struct IssueResponse<F = Value> {
+    pub id: String,
+    pub key: String,
+    #[serde(rename = "self")]
+    pub self_link: String,
+    pub fields: F,
+}
 
 #[derive(Debug)]
 pub enum JiraError {
@@ -54,15 +63,14 @@ pub struct SearchIssuesRequest {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchIssuesResponse {
+#[serde(rename_all = "camelCase", bound(deserialize = "F: Deserialize<'de>"))]
+pub struct SearchIssuesResponse<F = Value> {
     pub is_last: bool,
     #[serde(default)]
-    pub issues: Vec<IssueSummary>,
+    pub issues: Vec<IssueResponse<F>>,
     #[serde(default)]
     pub names: BTreeMap<String, String>,
     pub next_page_token: Option<String>,
     #[serde(default)]
     pub schema: BTreeMap<String, Value>,
 }
-

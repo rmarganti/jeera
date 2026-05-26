@@ -31,10 +31,13 @@ impl JiraClient {
         }
     }
 
-    pub fn search_issues(
+    pub fn search_issues<F>(
         &self,
         request: &SearchIssuesRequest,
-    ) -> Result<SearchIssuesResponse, JiraError> {
+    ) -> Result<SearchIssuesResponse<F>, JiraError>
+    where
+        F: DeserializeOwned,
+    {
         self.send_json(
             ureq::http::Method::POST,
             "/rest/api/3/search/jql",

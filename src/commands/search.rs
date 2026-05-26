@@ -1,5 +1,6 @@
-use crate::client::{JiraClient, types::SearchIssuesRequest};
+use crate::cli::SearchArgs;
 use crate::client::types::SearchIssuesResponse;
+use crate::client::{JiraClient, types::SearchIssuesRequest};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -29,7 +30,7 @@ pub struct SearchIssueFields {
     pub components: Vec<IssueComponent>,
 }
 
-pub fn run(client: &JiraClient) {
+pub fn run(client: &JiraClient, _args: &SearchArgs) {
     let request = SearchIssuesRequest {
         jql: "assignee = currentUser() ORDER BY updated DESC".to_string(),
         max_results: Some(5),
@@ -58,10 +59,9 @@ fn print_results(response: SearchIssuesResponse<SearchIssueFields>) {
             .join(", ");
 
         println!(
-            "{} [{} / {}] {}{}",
+            "{} [{}] {}{}",
             issue.key,
             issue.fields.status.name,
-            issue.fields.status.status_category.name,
             issue.fields.summary,
             if components.is_empty() {
                 String::new()

@@ -1,0 +1,24 @@
+{
+  "issues": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10006",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10006",
+      "key": "DEMO-106",
+      "fields": {
+        "summary": "Relax embedded content validation",
+        "components": [
+          {
+            "self": "https://example.atlassian.net/rest/api/3/component/2001",
+            "id": "2001",
+            "name": "Web Platform",
+            "description": "Shared web platform component"
+          }
+        ],
+        "status": "Closed"
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "isLast": true
+}

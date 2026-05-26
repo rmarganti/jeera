@@ -332,6 +332,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_base_url() {
+        let error = RawSettings {
+            base_url: "jira-relative-path".to_string(),
+            auth: AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        }
+        .validate()
+        .unwrap_err();
+
+        assert!(matches!(error, ConfigError::InvalidBaseUrl { .. }));
+    }
+
+    #[test]
     fn redacts_secrets_in_debug_output() {
         let settings = RawSettings {
             base_url: "https://example.atlassian.net".to_string(),
@@ -362,5 +376,27 @@ mod tests {
         assert!(matches!(error, ConfigError::MissingFile { .. }));
         assert!(rendered.contains("Create it with:"));
         assert!(rendered.contains("JEERA_CONFIG"));
+    }
+
+    #[test]
+    fn parse_failure_names_supported_auth_types() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!("jeera-invalid-{unique}.json"));
+        fs::write(
+            &path,
+            "{\"base_url\":\"https://example.atlassian.net\",\"auth\":{\"type\":\"oauth\"}}",
+        )
+        .unwrap();
+
+        let error = Settings::load_from_path(&path).unwrap_err();
+        let rendered = error.to_string();
+
+        assert!(matches!(error, ConfigError::ParseFailed { .. }));
+        assert!(rendered.contains("Supported auth types: basic, bearer"));
+
+        let _ = fs::remove_file(path);
     }
 }

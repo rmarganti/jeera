@@ -11,8 +11,10 @@ use url::ParseError;
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "F: Deserialize<'de>"))]
 pub struct IssueResponse<F = Value> {
+    #[allow(dead_code)]
     pub id: String,
     pub key: String,
+    #[allow(dead_code)]
     #[serde(rename = "self")]
     pub self_link: String,
     pub fields: F,
@@ -81,12 +83,16 @@ pub struct SearchIssuesRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", bound(deserialize = "F: Deserialize<'de>"))]
 pub struct SearchIssuesResponse<F = Value> {
+    #[allow(dead_code)]
     pub is_last: bool,
     #[serde(default)]
     pub issues: Vec<IssueResponse<F>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub names: BTreeMap<String, String>,
+    #[allow(dead_code)]
     pub next_page_token: Option<String>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub schema: BTreeMap<String, Value>,
 }

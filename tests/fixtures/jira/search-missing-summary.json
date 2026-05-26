@@ -1,0 +1,36 @@
+{
+  "issues": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10005",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10005",
+      "key": "DEMO-105",
+      "fields": {
+        "components": [
+          {
+            "self": "https://example.atlassian.net/rest/api/3/component/2001",
+            "id": "2001",
+            "name": "Web Platform",
+            "description": "Shared web platform component"
+          }
+        ],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/6",
+          "description": "Work is complete.",
+          "iconUrl": "https://example.atlassian.net/images/icons/statuses/closed.png",
+          "name": "Closed",
+          "id": "6",
+          "statusCategory": {
+            "self": "https://example.atlassian.net/rest/api/3/statuscategory/3",
+            "id": 3,
+            "key": "done",
+            "colorName": "green",
+            "name": "Done"
+          }
+        }
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "isLast": true
+}

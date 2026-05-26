@@ -1,0 +1,99 @@
+{
+  "issues": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10001",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+      "key": "DEMO-101",
+      "fields": {
+        "summary": "Align application CSP with CDN configuration",
+        "components": [
+          {
+            "self": "https://example.atlassian.net/rest/api/3/component/2001",
+            "id": "2001",
+            "name": "Web Platform",
+            "description": "Shared web platform component"
+          }
+        ],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/10131",
+          "description": "Work is currently under review.",
+          "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+          "name": "In Review",
+          "id": "10131",
+          "statusCategory": {
+            "self": "https://example.atlassian.net/rest/api/3/statuscategory/4",
+            "id": 4,
+            "key": "indeterminate",
+            "colorName": "yellow",
+            "name": "In Progress"
+          }
+        }
+      }
+    },
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10002",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10002",
+      "key": "DEMO-102",
+      "fields": {
+        "summary": "Support iframe parent messaging",
+        "components": [
+          {
+            "self": "https://example.atlassian.net/rest/api/3/component/2001",
+            "id": "2001",
+            "name": "Web Platform",
+            "description": "Shared web platform component"
+          }
+        ],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/6",
+          "description": "Work is complete.",
+          "iconUrl": "https://example.atlassian.net/images/icons/statuses/closed.png",
+          "name": "Closed",
+          "id": "6",
+          "statusCategory": {
+            "self": "https://example.atlassian.net/rest/api/3/statuscategory/3",
+            "id": 3,
+            "key": "done",
+            "colorName": "green",
+            "name": "Done"
+          }
+        }
+      }
+    },
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10003",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10003",
+      "key": "DEMO-103",
+      "fields": {
+        "summary": "Adjust embedded content height",
+        "components": [
+          {
+            "self": "https://example.atlassian.net/rest/api/3/component/2001",
+            "id": "2001",
+            "name": "Web Platform",
+            "description": "Shared web platform component"
+          }
+        ],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/6",
+          "description": "Work is complete.",
+          "iconUrl": "https://example.atlassian.net/images/icons/statuses/closed.png",
+          "name": "Closed",
+          "id": "6",
+          "statusCategory": {
+            "self": "https://example.atlassian.net/rest/api/3/statuscategory/3",
+            "id": 3,
+            "key": "done",
+            "colorName": "green",
+            "name": "Done"
+          }
+        }
+      }
+    }
+  ],
+  "nextPageToken": "sanitized-next-page-token",
+  "isLast": false
+}

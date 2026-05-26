@@ -1,0 +1,30 @@
+{
+  "issues": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10004",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10004",
+      "key": "DEMO-104",
+      "fields": {
+        "summary": "Populate missing environment values",
+        "components": [],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/6",
+          "description": "Work is complete.",
+          "iconUrl": "https://example.atlassian.net/images/icons/statuses/closed.png",
+          "name": "Closed",
+          "id": "6",
+          "statusCategory": {
+            "self": "https://example.atlassian.net/rest/api/3/statuscategory/3",
+            "id": 3,
+            "key": "done",
+            "colorName": "green",
+            "name": "Done"
+          }
+        }
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "isLast": true
+}

@@ -12,5 +12,8 @@ pub enum Command {
     Search(SearchArgs),
 }
 
-#[derive(Debug, Args)]
-pub struct SearchArgs {}
+#[derive(Debug, Args, Default)]
+pub struct SearchArgs {
+    #[arg(long)]
+    pub json: bool,
+}

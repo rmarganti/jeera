@@ -4,7 +4,7 @@ use crate::client::{
     types::{SearchIssuesRequest, SearchIssuesResponse},
 };
 use crate::error::AppError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
 #[derive(Debug, Deserialize)]
@@ -32,12 +32,14 @@ struct SearchCommand {
     max_results: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 struct SearchOutput {
     issues: Vec<SearchIssueOutput>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 struct SearchIssueOutput {
     key: String,
     summary: String,
@@ -48,7 +50,13 @@ struct SearchIssueOutput {
 pub fn run(client: &JiraClient, args: &SearchArgs) -> Result<(), AppError> {
     let command = SearchCommand::from_args(args);
     let output = execute(client, &command)?;
-    render_human(io::stdout().lock(), &output)?;
+
+    if args.json {
+        render_json(io::stdout().lock(), &output)?;
+    } else {
+        render_human(io::stdout().lock(), &output)?;
+    }
+
     Ok(())
 }
 
@@ -103,6 +111,11 @@ fn output_from_response(response: SearchIssuesResponse<SearchIssueFields>) -> Se
 }
 
 fn render_human(mut writer: impl Write, output: &SearchOutput) -> Result<(), AppError> {
+    if output.issues.is_empty() {
+        writeln!(writer, "No issues found.").map_err(|source| AppError::RenderOutput { source })?;
+        return Ok(());
+    }
+
     for issue in &output.issues {
         let components = issue.components.join(", ");
 
@@ -124,6 +137,13 @@ fn render_human(mut writer: impl Write, output: &SearchOutput) -> Result<(), App
     Ok(())
 }
 
+fn render_json(mut writer: impl Write, output: &SearchOutput) -> Result<(), AppError> {
+    serde_json::to_writer_pretty(&mut writer, output)
+        .map_err(|source| AppError::EncodeJsonOutput { source })?;
+    writeln!(writer).map_err(|source| AppError::RenderOutput { source })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,7 +156,7 @@ mod tests {
 
     #[test]
     fn search_request_contains_expected_fields() {
-        let command = SearchCommand::from_args(&SearchArgs {});
+        let command = SearchCommand::from_args(&SearchArgs::default());
         let request = command.to_request();
 
         assert_eq!(
@@ -211,6 +231,73 @@ mod tests {
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
             "DEMO-104 [Closed] Populate missing environment values\n"
+        );
+    }
+
+    #[test]
+    fn render_human_shows_empty_state_when_no_issues_match() {
+        let output = SearchOutput { issues: Vec::new() };
+        let mut rendered = Vec::new();
+
+        render_human(&mut rendered, &output).unwrap();
+
+        assert_eq!(String::from_utf8(rendered).unwrap(), "No issues found.\n");
+    }
+
+    #[test]
+    fn render_json_emits_stable_jeera_owned_schema() {
+        let response: SearchIssuesResponse<SearchIssueFields> =
+            serde_json::from_str(&fixture("search-basic.json")).unwrap();
+        let output = output_from_response(response);
+        let mut rendered = Vec::new();
+
+        render_json(&mut rendered, &output).unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            concat!(
+                "{\n",
+                "  \"issues\": [\n",
+                "    {\n",
+                "      \"key\": \"DEMO-101\",\n",
+                "      \"summary\": \"Align application CSP with CDN configuration\",\n",
+                "      \"status_name\": \"In Review\",\n",
+                "      \"components\": [\n",
+                "        \"Web Platform\"\n",
+                "      ]\n",
+                "    },\n",
+                "    {\n",
+                "      \"key\": \"DEMO-102\",\n",
+                "      \"summary\": \"Support iframe parent messaging\",\n",
+                "      \"status_name\": \"Closed\",\n",
+                "      \"components\": [\n",
+                "        \"Web Platform\"\n",
+                "      ]\n",
+                "    },\n",
+                "    {\n",
+                "      \"key\": \"DEMO-103\",\n",
+                "      \"summary\": \"Adjust embedded content height\",\n",
+                "      \"status_name\": \"Closed\",\n",
+                "      \"components\": [\n",
+                "        \"Web Platform\"\n",
+                "      ]\n",
+                "    }\n",
+                "  ]\n",
+                "}\n"
+            )
+        );
+    }
+
+    #[test]
+    fn render_json_emits_empty_collection_for_no_matches() {
+        let output = SearchOutput { issues: Vec::new() };
+        let mut rendered = Vec::new();
+
+        render_json(&mut rendered, &output).unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            "{\n  \"issues\": []\n}\n"
         );
     }
 }

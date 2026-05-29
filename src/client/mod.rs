@@ -1,6 +1,9 @@
-use crate::client::types::{JiraError, SearchIssuesRequest, SearchIssuesResponse};
+use crate::client::types::{
+    JiraError, JiraErrorResponse, SearchIssuesRequest, SearchIssuesResponse,
+};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
+use std::time::Duration;
 use url::Url;
 
 pub mod types;
@@ -13,6 +16,7 @@ pub struct JiraClient {
 pub struct JiraClientConfig {
     pub base_url: Url,
     pub auth: JiraAuth,
+    pub timeout: Duration,
 }
 
 pub enum JiraAuth {
@@ -24,6 +28,8 @@ impl JiraClient {
     pub fn new(config: JiraClientConfig) -> Self {
         let http_config = ureq::Agent::config_builder()
             .http_status_as_error(false)
+            .user_agent(client_user_agent())
+            .timeout_global(Some(config.timeout))
             .build();
 
         JiraClient {
@@ -41,12 +47,11 @@ impl JiraClient {
     {
         self.send_json(
             ureq::http::Method::POST,
-            "/rest/api/3/search/jql",
+            "rest/api/3/search/jql",
             Some(request),
         )
     }
 
-    /// Helper method to send JSON requests and handle responses.
     fn send_json<Request, Response>(
         &self,
         method: ureq::http::Method,
@@ -60,8 +65,9 @@ impl JiraClient {
         let url = self
             .config
             .base_url
-            .join(path)
+            .join(path.trim_start_matches('/'))
             .map_err(|source| JiraError::BuildUrl { source })?;
+
         let mut builder = ureq::http::Request::builder()
             .method(method)
             .uri(url.as_str())
@@ -97,7 +103,12 @@ impl JiraClient {
             .map_err(|source| JiraError::ReadResponseBody { source })?;
 
         if !(200..300).contains(&status) {
-            return Err(JiraError::HttpStatus { status, body });
+            let message = summarize_http_error_body(&body);
+            return Err(JiraError::HttpStatus {
+                status,
+                endpoint: format!("/{}", path.trim_start_matches('/')),
+                message,
+            });
         }
 
         serde_json::from_str(&body).map_err(|source| JiraError::DecodeResponse { source })
@@ -111,6 +122,41 @@ impl JiraClient {
             }
             JiraAuth::Bearer { token } => format!("Bearer {token}"),
         }
+    }
+}
+
+fn client_user_agent() -> String {
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    format!("jeera/{} ({build})", env!("CARGO_PKG_VERSION"))
+}
+
+fn summarize_http_error_body(body: &str) -> String {
+    if let Ok(error) = serde_json::from_str::<JiraErrorResponse>(body)
+        && let Some(message) = error.summary()
+    {
+        return message;
+    }
+
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "response body was empty".to_string();
+    }
+
+    collapse_and_truncate(trimmed, 240)
+}
+
+fn collapse_and_truncate(body: &str, max_chars: usize) -> String {
+    let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        collapsed
+    } else {
+        let mut excerpt = collapsed.chars().take(max_chars).collect::<String>();
+        excerpt.push('…');
+        excerpt
     }
 }
 
@@ -137,9 +183,14 @@ mod tests {
     }
 
     fn client(base_url: &str, auth: JiraAuth) -> JiraClient {
+        client_with_timeout(base_url, auth, Duration::from_secs(30))
+    }
+
+    fn client_with_timeout(base_url: &str, auth: JiraAuth, timeout: Duration) -> JiraClient {
         JiraClient::new(JiraClientConfig {
             base_url: Url::parse(base_url).unwrap(),
             auth,
+            timeout,
         })
     }
 
@@ -220,6 +271,38 @@ mod tests {
         (address, rx)
     }
 
+    fn spawn_delayed_server(delay: Duration, response_body: String) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+
+            loop {
+                let read = stream.read(&mut temp).unwrap();
+                if read == 0 {
+                    return;
+                }
+                buffer.extend_from_slice(&temp[..read]);
+                if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            thread::sleep(delay);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        address
+    }
+
     #[test]
     fn builds_basic_authorization_header() {
         let client = client(
@@ -274,16 +357,18 @@ mod tests {
         assert!(headers.contains("accept: application/json"));
         assert!(headers.contains("content-type: application/json"));
         assert!(headers.contains("authorization: bearer secret-token"));
+        assert!(headers.contains("user-agent: jeera/"));
         assert_eq!(body["jql"], "project = DEMO ORDER BY updated DESC");
         assert_eq!(body["maxResults"], 2);
         assert_eq!(body["fields"], serde_json::json!(["summary", "status"]));
     }
 
     #[test]
-    fn search_issues_returns_http_status_errors_with_body() {
+    fn search_issues_formats_jira_error_body() {
         let (base_url, _rx) = spawn_server(
             "401 Unauthorized",
-            r#"{"errorMessages":["Unauthorized"]}"#.to_string(),
+            r#"{"errorMessages":["Unauthorized"],"errors":{"projectKey":"Project key is required"}}"#
+                .to_string(),
         );
         let client = client(
             &base_url,
@@ -300,11 +385,71 @@ mod tests {
             .unwrap_err();
 
         match error {
-            JiraError::HttpStatus { status, body } => {
+            JiraError::HttpStatus {
+                status,
+                endpoint,
+                message,
+            } => {
                 assert_eq!(status, 401);
-                assert!(body.contains("Unauthorized"));
+                assert_eq!(endpoint, "/rest/api/3/search/jql");
+                assert_eq!(message, "Unauthorized; projectKey: Project key is required");
             }
             other => panic!("expected HttpStatus error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_issues_falls_back_to_raw_http_error_body() {
+        let (base_url, _rx) = spawn_server("500 Internal Server Error", "oops".to_string());
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+
+        let error = client
+            .search_issues::<Value>(&SearchIssuesRequest {
+                jql: "project = DEMO".to_string(),
+                ..Default::default()
+            })
+            .unwrap_err();
+
+        match error {
+            JiraError::HttpStatus {
+                status, message, ..
+            } => {
+                assert_eq!(status, 500);
+                assert_eq!(message, "oops");
+            }
+            other => panic!("expected HttpStatus error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_issues_times_out_using_configured_timeout() {
+        let base_url =
+            spawn_delayed_server(Duration::from_millis(250), fixture("search-basic.json"));
+        let client = client_with_timeout(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+            Duration::from_millis(50),
+        );
+
+        let error = client
+            .search_issues::<Value>(&SearchIssuesRequest {
+                jql: "project = DEMO".to_string(),
+                ..Default::default()
+            })
+            .unwrap_err();
+
+        match error {
+            JiraError::Transport { source } => {
+                assert!(source.to_string().to_lowercase().contains("timeout"));
+            }
+            other => panic!("expected Transport timeout error, got {other:?}"),
         }
     }
 

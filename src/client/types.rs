@@ -20,6 +20,60 @@ pub struct IssueResponse<F = Value> {
     pub fields: F,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraErrorResponse {
+    #[serde(default)]
+    pub error_messages: Vec<String>,
+
+    #[serde(default)]
+    pub errors: BTreeMap<String, String>,
+
+    #[serde(default)]
+    pub message: Option<String>,
+
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub status: Option<u16>,
+
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub http_status_code: Option<u16>,
+}
+
+impl JiraErrorResponse {
+    pub fn summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+
+        if let Some(message) = &self.message {
+            let message = message.trim();
+            if !message.is_empty() {
+                parts.push(message.to_string());
+            }
+        }
+
+        if !self.error_messages.is_empty() {
+            parts.push(self.error_messages.join("; "));
+        }
+
+        if !self.errors.is_empty() {
+            parts.push(
+                self.errors
+                    .iter()
+                    .map(|(field, message)| format!("{field}: {message}"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
+        }
+
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("; "))
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum JiraError {
     #[error("while building Jira URL: {source}")]
@@ -42,8 +96,12 @@ pub enum JiraError {
         #[source]
         source: ureq::Error,
     },
-    #[error("jira returned HTTP {status}: {body}")]
-    HttpStatus { status: u16, body: String },
+    #[error("jira returned HTTP {status} for {endpoint}: {message}")]
+    HttpStatus {
+        status: u16,
+        endpoint: String,
+        message: String,
+    },
     #[error("while reading Jira response body: {source}")]
     ReadResponseBody {
         #[source]

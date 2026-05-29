@@ -5,6 +5,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use thiserror::Error;
 use url::Url;
 
@@ -15,6 +16,7 @@ use url::Url;
 pub struct Settings {
     pub base_url: Url,
     pub auth: AuthSettings,
+    pub http_timeout: Duration,
 }
 
 #[derive(Deserialize)]
@@ -34,7 +36,7 @@ pub enum ConfigError {
     ConfigDirectoryNotFound,
 
     #[error(
-        "config file not found at {path}\n\nCreate it with:\n{{\n  \"base_url\": \"https://your-domain.atlassian.net\",\n  \"auth\": {{\n    \"type\": \"basic\",\n    \"email\": \"you@example.com\",\n    \"api_token\": \"<jira-api-token>\"\n  }}\n}}\n\nOr set JEERA_CONFIG=/path/to/settings.json"
+        "config file not found at {path}\n\nCreate it with:\n{{\n  \"base_url\": \"https://your-domain.atlassian.net\",\n  \"http_timeout_seconds\": 30,\n  \"auth\": {{\n    \"type\": \"basic\",\n    \"email\": \"you@example.com\",\n    \"api_token\": \"<jira-api-token>\"\n  }}\n}}\n\nOr set JEERA_CONFIG=/path/to/settings.json"
     )]
     MissingFile { path: PathBuf },
 
@@ -60,6 +62,9 @@ pub enum ConfigError {
 
     #[error("invalid auth config: {reason}")]
     InvalidAuth { reason: &'static str },
+
+    #[error("invalid http_timeout_seconds {value}: {reason}")]
+    InvalidHttpTimeout { value: u64, reason: &'static str },
 }
 
 // ----------------------------------------------------------------
@@ -70,6 +75,7 @@ impl fmt::Debug for Settings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Settings")
             .field("base_url", &self.base_url)
+            .field("http_timeout_seconds", &self.http_timeout.as_secs())
             .field("auth", &self.auth)
             .finish()
     }
@@ -130,6 +136,7 @@ impl Settings {
         JiraClientConfig {
             base_url: self.base_url,
             auth,
+            timeout: self.http_timeout,
         }
     }
 }
@@ -141,6 +148,8 @@ impl Settings {
 #[derive(Debug, Deserialize)]
 struct RawSettings {
     base_url: String,
+    #[serde(default = "default_http_timeout_seconds")]
+    http_timeout_seconds: u64,
     auth: AuthSettings,
 }
 
@@ -148,10 +157,12 @@ impl RawSettings {
     fn validate(self) -> Result<Settings, ConfigError> {
         let base_url = validate_base_url(&self.base_url)?;
         validate_auth(&self.auth)?;
+        let http_timeout = validate_http_timeout(self.http_timeout_seconds)?;
 
         Ok(Settings {
             base_url,
             auth: self.auth,
+            http_timeout,
         })
     }
 }
@@ -191,16 +202,28 @@ fn validate_base_url(value: &str) -> Result<Url, ConfigError> {
         });
     }
 
-    if url.path().ends_with('/') {
-        let normalized_path = url.path().trim_end_matches('/').to_string();
-        url.set_path(if normalized_path.is_empty() {
-            "/"
-        } else {
-            &normalized_path
-        });
+    if !url.path().ends_with('/') {
+        let mut normalized_path = url.path().to_string();
+        normalized_path.push('/');
+        url.set_path(&normalized_path);
     }
 
     Ok(url)
+}
+
+fn default_http_timeout_seconds() -> u64 {
+    30
+}
+
+fn validate_http_timeout(value: u64) -> Result<Duration, ConfigError> {
+    if value == 0 {
+        return Err(ConfigError::InvalidHttpTimeout {
+            value,
+            reason: "must be greater than zero",
+        });
+    }
+
+    Ok(Duration::from_secs(value))
 }
 
 fn validate_auth(auth: &AuthSettings) -> Result<(), ConfigError> {
@@ -269,6 +292,14 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn raw_settings(base_url: &str, http_timeout_seconds: u64, auth: AuthSettings) -> RawSettings {
+        RawSettings {
+            base_url: base_url.to_string(),
+            http_timeout_seconds,
+            auth,
+        }
+    }
+
     #[test]
     fn prefers_jeera_config_override() {
         let path = settings_path_with(|key| match key {
@@ -304,12 +335,13 @@ mod tests {
 
     #[test]
     fn validates_and_normalizes_base_url() {
-        let settings = RawSettings {
-            base_url: " https://example.atlassian.net/ ".to_string(),
-            auth: AuthSettings::Bearer {
+        let settings = raw_settings(
+            " https://example.atlassian.net/ ",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
                 token: "secret".to_string(),
             },
-        }
+        )
         .validate()
         .unwrap();
 
@@ -317,14 +349,41 @@ mod tests {
     }
 
     #[test]
+    fn preserves_base_url_path_prefix_for_joining() {
+        let settings = raw_settings(
+            "https://example.atlassian.net/jira",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        )
+        .validate()
+        .unwrap();
+
+        assert_eq!(
+            settings.base_url.as_str(),
+            "https://example.atlassian.net/jira/"
+        );
+        assert_eq!(
+            settings
+                .base_url
+                .join("rest/api/3/search/jql")
+                .unwrap()
+                .as_str(),
+            "https://example.atlassian.net/jira/rest/api/3/search/jql"
+        );
+    }
+
+    #[test]
     fn rejects_invalid_auth() {
-        let error = RawSettings {
-            base_url: "https://example.atlassian.net".to_string(),
-            auth: AuthSettings::Basic {
+        let error = raw_settings(
+            "https://example.atlassian.net",
+            default_http_timeout_seconds(),
+            AuthSettings::Basic {
                 email: " ".to_string(),
                 api_token: "secret".to_string(),
             },
-        }
+        )
         .validate()
         .unwrap_err();
 
@@ -333,12 +392,13 @@ mod tests {
 
     #[test]
     fn rejects_invalid_base_url() {
-        let error = RawSettings {
-            base_url: "jira-relative-path".to_string(),
-            auth: AuthSettings::Bearer {
+        let error = raw_settings(
+            "jira-relative-path",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
                 token: "secret".to_string(),
             },
-        }
+        )
         .validate()
         .unwrap_err();
 
@@ -347,13 +407,14 @@ mod tests {
 
     #[test]
     fn redacts_secrets_in_debug_output() {
-        let settings = RawSettings {
-            base_url: "https://example.atlassian.net".to_string(),
-            auth: AuthSettings::Basic {
+        let settings = raw_settings(
+            "https://example.atlassian.net",
+            default_http_timeout_seconds(),
+            AuthSettings::Basic {
                 email: "you@example.com".to_string(),
                 api_token: "secret-token".to_string(),
             },
-        }
+        )
         .validate()
         .unwrap();
 
@@ -375,6 +436,7 @@ mod tests {
 
         assert!(matches!(error, ConfigError::MissingFile { .. }));
         assert!(rendered.contains("Create it with:"));
+        assert!(rendered.contains("http_timeout_seconds"));
         assert!(rendered.contains("JEERA_CONFIG"));
     }
 
@@ -398,5 +460,50 @@ mod tests {
         assert!(rendered.contains("Supported auth types: basic, bearer"));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn defaults_http_timeout_to_thirty_seconds() {
+        let settings = raw_settings(
+            "https://example.atlassian.net",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        )
+        .validate()
+        .unwrap();
+
+        assert_eq!(settings.http_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn accepts_custom_http_timeout() {
+        let settings = raw_settings(
+            "https://example.atlassian.net",
+            7,
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        )
+        .validate()
+        .unwrap();
+
+        assert_eq!(settings.http_timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn rejects_zero_http_timeout() {
+        let error = raw_settings(
+            "https://example.atlassian.net",
+            0,
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        )
+        .validate()
+        .unwrap_err();
+
+        assert!(matches!(error, ConfigError::InvalidHttpTimeout { .. }));
     }
 }

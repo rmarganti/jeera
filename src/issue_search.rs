@@ -1,7 +1,7 @@
 //! Jira issue search domain module.
 //!
-//! The command adapter enters through `execute`; tests and future callers can use
-//! `prepare` when they only need the prepared Jira request.
+//! The command adapter enters through `prepare` and `execute_prepared`; tests and future
+//! callers can use `prepare` when they only need the prepared Jira request.
 
 use crate::cli::SearchArgs;
 use crate::client::{
@@ -68,9 +68,11 @@ struct SearchIssueOutput {
     components: Vec<String>,
 }
 
-/// Runs a complete Jira issue search behind the domain interface.
-pub fn execute(client: &JiraClient, args: &SearchArgs) -> Result<SearchOutput, AppError> {
-    let prepared = prepare(client, args)?;
+/// Executes a previously prepared Jira issue search.
+pub fn execute_prepared(
+    client: &JiraClient,
+    prepared: &PreparedIssueSearch,
+) -> Result<SearchOutput, AppError> {
     let response = client
         .search_issues::<SearchIssueFields>(prepared.request())
         .map_err(|source| AppError::ExecuteSearch { source })?;
@@ -123,6 +125,10 @@ impl PreparedIssueSearch {
     /// Exposes only the transport request; search preparation remains inside this module.
     pub fn request(&self) -> &SearchIssuesRequest {
         &self.request
+    }
+
+    pub fn jql(&self) -> &str {
+        &self.request.jql
     }
 }
 
@@ -563,6 +569,10 @@ mod tests {
         let request = prepared.request();
 
         assert_eq!(
+            prepared.jql(),
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
+        assert_eq!(
             request.jql,
             "assignee = currentUser() ORDER BY updated DESC"
         );
@@ -632,6 +642,28 @@ mod tests {
         assert_eq!(
             prepared.request().jql,
             "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn final_jql_keeps_board_derived_clauses_when_combining_with_raw_jql() {
+        let args = SearchArgs {
+            jql: Some("project = GCCDEV ORDER BY Rank ASC".to_string()),
+            component: vec!["QQMS".to_string()],
+            ..Default::default()
+        };
+        let prepared = prepare_with_board_source(&args, Some(215), |board_id| {
+            assert_eq!(board_id, 215);
+            Ok(BoardJqlFilter {
+                filter_id: 10492,
+                sub_query: Some("fixVersion is EMPTY".to_string()),
+            })
+        })
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "(project = GCCDEV) AND filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
         );
     }
 

@@ -18,7 +18,10 @@ pub struct SearchArgs {
     #[arg(long)]
     pub json: bool,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Combine raw JQL with any structured filters instead of replacing them"
+    )]
     pub jql: Option<String>,
 
     #[arg(long)]
@@ -63,6 +66,12 @@ pub struct SearchArgs {
     #[arg(long)]
     pub next_page_token: Option<String>,
 
+    #[arg(
+        long,
+        help = "Print the final JQL to stderr before executing the search"
+    )]
+    pub debug_jql: bool,
+
     #[arg(long, default_value = "updated")]
     pub sort: String,
 
@@ -97,6 +106,7 @@ impl Default for SearchArgs {
             open: false,
             limit: 50,
             next_page_token: None,
+            debug_jql: false,
             sort: "updated".to_string(),
             asc: false,
             desc: false,

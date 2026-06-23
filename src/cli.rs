@@ -69,7 +69,10 @@ pub struct SearchArgs {
     #[arg(long, conflicts_with = "desc")]
     pub asc: bool,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Explicitly request descending sort order (the default if --asc is not set)"
+    )]
     pub desc: bool,
 }
 

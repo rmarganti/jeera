@@ -13,6 +13,9 @@ use crate::jql::{self, Clause, Order, Query, SortDirection, UserRef, Value};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 
+const SEARCH_MIN_LIMIT: u32 = 1;
+const SEARCH_MAX_LIMIT: u32 = 100;
+
 /// Prepared search intent after validation, board resolution, JQL assembly, and field selection.
 #[derive(Debug)]
 pub struct PreparedIssueSearch {
@@ -132,10 +135,12 @@ fn prepare_with_board_source<F>(
 where
     F: FnOnce(u64) -> Result<BoardJqlFilter, AppError>,
 {
+    validate_search_args(args)?;
+
     let configured_board_id = args.board.or(default_board_id);
     if configured_board_id.is_none() && !has_explicit_search_restriction(args) {
         return Err(AppError::InvalidSearch {
-            reason: "provide at least one search restriction, such as --jql, --board, --project, --assignee, --component, --status, --label, --text, or configure default_board_id",
+            reason: "provide at least one search restriction, such as --jql, --board, --project, --assignee, --component, --status, --label, --text, or configure default_board_id".to_string(),
         });
     }
 
@@ -168,6 +173,70 @@ fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
         || !args.label.is_empty()
         || args.text.is_some()
         || args.open
+}
+
+fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
+    validate_limit(args.limit)?;
+    validate_optional_value("jql", args.jql.as_deref())?;
+    validate_optional_value("project", args.project.as_deref())?;
+    validate_optional_value("assignee", args.assignee.as_deref())?;
+    validate_optional_value("reporter", args.reporter.as_deref())?;
+    validate_optional_value("status-category", args.status_category.as_deref())?;
+    validate_optional_value("text", args.text.as_deref())?;
+    validate_optional_value("next-page-token", args.next_page_token.as_deref())?;
+    validate_repeated_values("status", &args.status)?;
+    validate_repeated_values("type", &args.issue_type)?;
+    validate_repeated_values("component", &args.component)?;
+    validate_repeated_values("label", &args.label)?;
+    validate_sort_field(&args.sort)?;
+    Ok(())
+}
+
+fn validate_limit(limit: u32) -> Result<(), AppError> {
+    if (SEARCH_MIN_LIMIT..=SEARCH_MAX_LIMIT).contains(&limit) {
+        Ok(())
+    } else {
+        Err(AppError::InvalidSearch {
+            reason: format!("--limit must be between {SEARCH_MIN_LIMIT} and {SEARCH_MAX_LIMIT}"),
+        })
+    }
+}
+
+fn validate_optional_value(field: &str, value: Option<&str>) -> Result<(), AppError> {
+    match value {
+        Some(value) if value.trim().is_empty() => Err(AppError::InvalidSearch {
+            reason: format!("--{field} cannot be empty"),
+        }),
+        _ => Ok(()),
+    }
+}
+
+fn validate_repeated_values(field: &str, values: &[String]) -> Result<(), AppError> {
+    if values.iter().any(|value| value.trim().is_empty()) {
+        Err(AppError::InvalidSearch {
+            reason: format!("--{field} cannot contain empty values"),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_sort_field(sort: &str) -> Result<(), AppError> {
+    if sort.trim().is_empty() {
+        return Err(AppError::InvalidSearch {
+            reason: "--sort cannot be empty".to_string(),
+        });
+    }
+
+    if sort.contains(',') || sort.chars().any(char::is_whitespace) {
+        return Err(AppError::InvalidSearch {
+            reason:
+                "--sort must be a single Jira field name; use --jql for custom ORDER BY clauses"
+                    .to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 fn board_filter(client: &JiraClient, board_id: u64) -> Result<BoardJqlFilter, AppError> {
@@ -352,6 +421,125 @@ mod tests {
     }
 
     #[test]
+    fn search_rejects_zero_limit() {
+        let error = prepare_with_board_source(
+            &SearchArgs {
+                assignee: Some("me".to_string()),
+                limit: 0,
+                ..Default::default()
+            },
+            None,
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: --limit must be between 1 and 100"
+        );
+    }
+
+    #[test]
+    fn search_rejects_overly_large_limit() {
+        let error = prepare_with_board_source(
+            &SearchArgs {
+                assignee: Some("me".to_string()),
+                limit: 101,
+                ..Default::default()
+            },
+            None,
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: --limit must be between 1 and 100"
+        );
+    }
+
+    #[test]
+    fn search_rejects_empty_string_filters() {
+        for args in [
+            SearchArgs {
+                project: Some("   ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                assignee: Some("".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                reporter: Some(" ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                status_category: Some("\t".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                text: Some("".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                jql: Some("\n".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                next_page_token: Some(" ".to_string()),
+                assignee: Some("me".to_string()),
+                ..Default::default()
+            },
+        ] {
+            let error = prepare_with_board_source(&args, None, |_| unreachable!()).unwrap_err();
+            assert!(error.to_string().contains("cannot be empty"));
+        }
+    }
+
+    #[test]
+    fn search_rejects_empty_values_in_multi_value_filters() {
+        for args in [
+            SearchArgs {
+                status: vec!["In Progress".to_string(), " ".to_string()],
+                ..Default::default()
+            },
+            SearchArgs {
+                issue_type: vec!["Bug".to_string(), "".to_string()],
+                ..Default::default()
+            },
+            SearchArgs {
+                component: vec!["QQMS".to_string(), "\t".to_string()],
+                ..Default::default()
+            },
+            SearchArgs {
+                label: vec!["customer".to_string(), " ".to_string()],
+                ..Default::default()
+            },
+        ] {
+            let error = prepare_with_board_source(&args, None, |_| unreachable!()).unwrap_err();
+            assert!(error.to_string().contains("cannot contain empty values"));
+        }
+    }
+
+    #[test]
+    fn search_rejects_invalid_sort_values() {
+        for sort in ["", "   ", "updated desc", "updated,created"] {
+            let error = prepare_with_board_source(
+                &SearchArgs {
+                    assignee: Some("me".to_string()),
+                    sort: sort.to_string(),
+                    ..Default::default()
+                },
+                None,
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+
+            assert!(error.to_string().contains("--sort"));
+        }
+    }
+
+    #[test]
     fn invalid_board_filter_id_is_reported_instead_of_falling_back_to_board_id() {
         let error = parse_board_filter_id(215, "not-a-filter-id").unwrap_err();
 
@@ -395,6 +583,20 @@ mod tests {
 
         assert_eq!(request.max_results, Some(25));
         assert_eq!(request.next_page_token, Some("token-123".to_string()));
+    }
+
+    #[test]
+    fn explicit_desc_is_a_documented_no_op_because_descending_is_the_default() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            desc: true,
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@ pub enum AppError {
     LoadConfig { source: ConfigError },
 
     #[error("invalid search: {reason}")]
-    InvalidSearch { reason: &'static str },
+    InvalidSearch { reason: String },
 
     #[error("while preparing board {board_id} for search: {source}")]
     PrepareBoardSearch { board_id: u64, source: JiraError },

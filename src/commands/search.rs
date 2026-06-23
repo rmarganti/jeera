@@ -26,10 +26,109 @@ fn run_with_writers(
     if args.json {
         render::render_json(&mut stdout, &output)?;
     } else {
-        issue_search::render_human(&mut stdout, &output, prepared.human_columns())?;
+        let next_page_command = output
+            .next_page_token()
+            .filter(|_| !output.is_last())
+            .map(|next_page_token| build_next_page_command(args, next_page_token));
+        issue_search::render_human(
+            &mut stdout,
+            &output,
+            prepared.human_columns(),
+            next_page_command.as_deref(),
+        )?;
     }
 
     Ok(())
+}
+
+fn build_next_page_command(args: &SearchArgs, next_page_token: &str) -> String {
+    let mut parts = vec!["jeera".to_string(), "search".to_string()];
+
+    if args.json {
+        parts.push("--json".to_string());
+    }
+    if let Some(jql) = &args.jql {
+        parts.push("--jql".to_string());
+        parts.push(shell_quote(jql));
+    }
+    if let Some(board) = args.board {
+        parts.push("--board".to_string());
+        parts.push(board.to_string());
+    }
+    if let Some(project) = &args.project {
+        parts.push("--project".to_string());
+        parts.push(shell_quote(project));
+    }
+    if let Some(assignee) = &args.assignee {
+        parts.push("--assignee".to_string());
+        parts.push(shell_quote(assignee));
+    }
+    if args.unassigned {
+        parts.push("--unassigned".to_string());
+    }
+    if let Some(reporter) = &args.reporter {
+        parts.push("--reporter".to_string());
+        parts.push(shell_quote(reporter));
+    }
+    for status in &args.status {
+        parts.push("--status".to_string());
+        parts.push(shell_quote(status));
+    }
+    if let Some(status_category) = &args.status_category {
+        parts.push("--status-category".to_string());
+        parts.push(shell_quote(status_category));
+    }
+    for issue_type in &args.issue_type {
+        parts.push("--type".to_string());
+        parts.push(shell_quote(issue_type));
+    }
+    for component in &args.component {
+        parts.push("--component".to_string());
+        parts.push(shell_quote(component));
+    }
+    for label in &args.label {
+        parts.push("--label".to_string());
+        parts.push(shell_quote(label));
+    }
+    if let Some(text) = &args.text {
+        parts.push("--text".to_string());
+        parts.push(shell_quote(text));
+    }
+    if args.open {
+        parts.push("--open".to_string());
+    }
+    parts.push("--limit".to_string());
+    parts.push(args.limit.to_string());
+    if let Some(columns) = &args.columns {
+        parts.push("--columns".to_string());
+        parts.push(shell_quote(columns));
+    }
+    if args.sort != "updated" {
+        parts.push("--sort".to_string());
+        parts.push(shell_quote(&args.sort));
+    }
+    if args.asc {
+        parts.push("--asc".to_string());
+    }
+    parts.push("--next-page-token".to_string());
+    parts.push(shell_quote(next_page_token));
+    if let Some(query) = &args.query {
+        parts.push(shell_quote(query));
+    }
+
+    parts.join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'/' | b':' | b'@' | b'='))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +201,49 @@ mod tests {
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
             "Final JQL: assignee = currentUser() ORDER BY updated DESC\n"
+        );
+    }
+
+    #[test]
+    fn build_next_page_command_preserves_filters_and_quotes_spaces() {
+        let args = SearchArgs {
+            query: Some("release blockers".to_string()),
+            board: Some(215),
+            project: Some("GCCDEV".to_string()),
+            status: vec!["In Progress".to_string()],
+            component: vec!["Core Platform".to_string()],
+            columns: Some("key,status,summary".to_string()),
+            limit: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_next_page_command(&args, "token with spaces"),
+            "jeera search --board 215 --project GCCDEV --status 'In Progress' --component 'Core Platform' --limit 1 --columns 'key,status,summary' --next-page-token 'token with spaces' 'release blockers'"
+        );
+    }
+
+    #[test]
+    fn run_prints_copy_pasteable_next_page_command() {
+        let body = r#"{"isLast":false,"nextPageToken":"next token","issues":[]}"#;
+        let (base_url, rx) = spawn_server("200 OK", body);
+        let client = test_client(base_url);
+        let args = SearchArgs {
+            project: Some("GCCDEV".to_string()),
+            component: vec!["QQMS".to_string()],
+            limit: 1,
+            ..Default::default()
+        };
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        run_with_writers(&client, &args, &mut stdout, &mut stderr).unwrap();
+
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(String::from_utf8(stderr).unwrap(), "");
+        assert_eq!(
+            String::from_utf8(stdout).unwrap(),
+            "No issues found.\nNext page token: next token\nNext page command: jeera search --project GCCDEV --component QQMS --limit 1 --next-page-token 'next token'\n"
         );
     }
 }

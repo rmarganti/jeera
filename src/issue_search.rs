@@ -136,6 +136,7 @@ pub(crate) fn render_human(
     mut writer: impl Write,
     output: &SearchOutput,
     columns: &[SearchColumn],
+    next_page_command: Option<&str>,
 ) -> Result<(), AppError> {
     if output.issues.is_empty() {
         writeln!(writer, "No issues found.").map_err(|source| AppError::RenderOutput { source })?;
@@ -173,9 +174,24 @@ pub(crate) fn render_human(
     {
         writeln!(writer, "Next page token: {next_page_token}")
             .map_err(|source| AppError::RenderOutput { source })?;
+
+        if let Some(next_page_command) = next_page_command {
+            writeln!(writer, "Next page command: {next_page_command}")
+                .map_err(|source| AppError::RenderOutput { source })?;
+        }
     }
 
     Ok(())
+}
+
+impl SearchOutput {
+    pub(crate) fn is_last(&self) -> bool {
+        self.is_last
+    }
+
+    pub(crate) fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref()
+    }
 }
 
 impl PreparedIssueSearch {
@@ -1122,7 +1138,7 @@ mod tests {
         let output = output_from_search_response(response);
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output, &[]).unwrap();
+        render_human(&mut rendered, &output, &[], None).unwrap();
 
         let rendered = String::from_utf8(rendered).unwrap();
         assert!(rendered.contains("\u{1b}[1m\u{1b}[36mDEMO-101\u{1b}[0m [\u{1b}[33mIn Review\u{1b}[0m] Align application CSP with CDN configuration (\u{1b}[2mWeb Platform\u{1b}[0m)"));
@@ -1149,6 +1165,7 @@ mod tests {
                 SearchColumn::Updated,
                 SearchColumn::Summary,
             ],
+            None,
         )
         .unwrap();
 
@@ -1168,7 +1185,7 @@ mod tests {
         let output = output_from_search_response(response);
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output, &[]).unwrap();
+        render_human(&mut rendered, &output, &[], None).unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
@@ -1191,6 +1208,7 @@ mod tests {
                 SearchColumn::Components,
                 SearchColumn::Summary,
             ],
+            None,
         )
         .unwrap();
 
@@ -1208,7 +1226,7 @@ mod tests {
         };
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output, &[]).unwrap();
+        render_human(&mut rendered, &output, &[], None).unwrap();
 
         assert_eq!(String::from_utf8(rendered).unwrap(), "No issues found.\n");
     }
@@ -1222,11 +1240,17 @@ mod tests {
         };
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output, &[]).unwrap();
+        render_human(
+            &mut rendered,
+            &output,
+            &[],
+            Some("jeera search --next-page-token abc"),
+        )
+        .unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
-            "No issues found.\nNext page token: abc\n"
+            "No issues found.\nNext page token: abc\nNext page command: jeera search --next-page-token abc\n"
         );
     }
 

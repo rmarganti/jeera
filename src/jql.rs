@@ -1,46 +1,40 @@
-use crate::cli::SearchArgs;
-use crate::error::AppError;
+//! Generic JQL rendering module.
+//!
+//! Domain modules decide which clauses they need; this module only knows how to render them.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IssueQuery {
-    filters: Vec<JqlFilter>,
-    order_by: Option<String>,
+/// A composable JQL query: ordered clauses plus an optional trailing `ORDER BY`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Query {
+    clauses: Vec<Clause>,
+    order_by: Option<Order>,
 }
 
+/// Generic JQL clause vocabulary shared by domain modules.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoardJqlFilter {
-    pub filter_id: u64,
-    pub sub_query: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JqlFilter {
+pub enum Clause {
     Raw(String),
-    BoardFilter(u64),
-    BoardSubQuery(String),
-    Project(String),
-    Assignee(UserRef),
-    Reporter(UserRef),
-    Status(Vec<String>),
-    StatusCategory(String),
-    IssueType(Vec<String>),
-    Component(Vec<String>),
-    Label(Vec<String>),
+    FieldEquals { field: String, value: Value },
+    FieldIn { field: String, values: Vec<String> },
+    FieldMatches { field: String, value: String },
+    IsEmpty { field: String },
+}
+
+/// JQL values that need distinct rendering rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
     Text(String),
-    Open,
-    Unassigned,
+    Function(String),
+    Number(u64),
 }
 
+/// Sort expression; `Raw` preserves user-supplied order clauses without re-parsing Jira syntax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UserRef {
-    CurrentUser,
-    Named(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JqlOrder {
-    field: String,
-    direction: SortDirection,
+pub enum Order {
+    Field {
+        field: String,
+        direction: SortDirection,
+    },
+    Raw(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,101 +43,29 @@ pub enum SortDirection {
     Desc,
 }
 
-impl IssueQuery {
-    pub fn from_search_args(
-        args: &SearchArgs,
-        board_filter: Option<BoardJqlFilter>,
-    ) -> Result<Self, AppError> {
-        let (raw_clause, raw_order_by) =
-            args.jql.as_deref().map(split_order_by).unwrap_or_default();
-        let mut filters = Vec::new();
+/// Shared user shorthand used by Jira filters such as assignee and reporter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserRef {
+    CurrentUser,
+    Named(String),
+}
 
-        if let Some(raw_clause) = raw_clause
-            && !raw_clause.trim().is_empty()
-        {
-            filters.push(JqlFilter::Raw(raw_clause.trim().to_string()));
-        }
-
-        if let Some(board_filter) = board_filter {
-            filters.push(JqlFilter::BoardFilter(board_filter.filter_id));
-            if let Some(sub_query) = board_filter.sub_query
-                && !sub_query.trim().is_empty()
-            {
-                filters.push(JqlFilter::BoardSubQuery(sub_query));
-            }
-        }
-
-        if let Some(project) = &args.project {
-            filters.push(JqlFilter::Project(project.clone()));
-        }
-
-        if args.unassigned {
-            filters.push(JqlFilter::Unassigned);
-        } else if let Some(assignee) = &args.assignee {
-            filters.push(JqlFilter::Assignee(parse_user_ref(assignee)));
-        }
-
-        if let Some(reporter) = &args.reporter {
-            filters.push(JqlFilter::Reporter(parse_user_ref(reporter)));
-        }
-
-        if !args.status.is_empty() {
-            filters.push(JqlFilter::Status(args.status.clone()));
-        }
-
-        if let Some(status_category) = &args.status_category {
-            filters.push(JqlFilter::StatusCategory(status_category.clone()));
-        }
-
-        if !args.issue_type.is_empty() {
-            filters.push(JqlFilter::IssueType(args.issue_type.clone()));
-        }
-
-        if !args.component.is_empty() {
-            filters.push(JqlFilter::Component(args.component.clone()));
-        }
-
-        if !args.label.is_empty() {
-            filters.push(JqlFilter::Label(args.label.clone()));
-        }
-
-        if let Some(text) = &args.text {
-            filters.push(JqlFilter::Text(text.clone()));
-        }
-
-        if args.open {
-            filters.push(JqlFilter::Open);
-        }
-
-        let order_by = raw_order_by
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map_or_else(
-                || {
-                    Some(
-                        JqlOrder {
-                            field: args.sort.clone(),
-                            direction: if args.asc {
-                                SortDirection::Asc
-                            } else {
-                                SortDirection::Desc
-                            },
-                        }
-                        .to_jql(),
-                    )
-                },
-                |order_by| Some(format!("ORDER BY {order_by}")),
-            );
-
-        Ok(Self { filters, order_by })
+impl Query {
+    pub fn new() -> Self {
+        Self::default()
     }
 
+    pub fn push(&mut self, clause: Clause) {
+        self.clauses.push(clause);
+    }
+
+    pub fn order_by(&mut self, order: Order) {
+        self.order_by = Some(order);
+    }
+
+    /// Renders the complete JQL string used at the Jira transport seam.
     pub fn to_jql(&self) -> String {
-        let clauses = self
-            .filters
-            .iter()
-            .map(JqlFilter::to_jql)
-            .collect::<Vec<_>>();
+        let clauses = self.clauses.iter().map(Clause::to_jql).collect::<Vec<_>>();
 
         let mut jql = clauses.join(" AND ");
 
@@ -151,46 +73,98 @@ impl IssueQuery {
             if !jql.is_empty() {
                 jql.push(' ');
             }
-            jql.push_str(order_by);
+            jql.push_str(&order_by.to_jql());
         }
 
         jql
     }
 }
 
-impl JqlFilter {
+impl Clause {
+    /// Preserves caller-owned JQL while still composing it with structured clauses.
+    pub fn raw(value: impl Into<String>) -> Self {
+        Self::Raw(value.into())
+    }
+
+    pub fn field_equals(field: impl Into<String>, value: Value) -> Self {
+        Self::FieldEquals {
+            field: field.into(),
+            value,
+        }
+    }
+
+    pub fn field_in(field: impl Into<String>, values: Vec<String>) -> Self {
+        Self::FieldIn {
+            field: field.into(),
+            values,
+        }
+    }
+
+    pub fn field_matches(field: impl Into<String>, value: impl Into<String>) -> Self {
+        Self::FieldMatches {
+            field: field.into(),
+            value: value.into(),
+        }
+    }
+
+    pub fn is_empty(field: impl Into<String>) -> Self {
+        Self::IsEmpty {
+            field: field.into(),
+        }
+    }
+
     fn to_jql(&self) -> String {
         match self {
             Self::Raw(value) => format!("({value})"),
-            Self::BoardFilter(filter_id) => format!("filter = {filter_id}"),
-            Self::BoardSubQuery(query) => format!("({query})"),
-            Self::Project(value) => format!("project = {}", quote(value)),
-            Self::Assignee(user) => format!("assignee = {}", user.to_jql()),
-            Self::Reporter(user) => format!("reporter = {}", user.to_jql()),
-            Self::Status(values) => field_values("status", values),
-            Self::StatusCategory(value) => format!("statusCategory = {}", quote(value)),
-            Self::IssueType(values) => field_values("issuetype", values),
-            Self::Component(values) => field_values("component", values),
-            Self::Label(values) => field_values("labels", values),
-            Self::Text(value) => format!("text ~ {}", quote(value)),
-            Self::Open => "statusCategory != Done".to_string(),
-            Self::Unassigned => "assignee is EMPTY".to_string(),
+            Self::FieldEquals { field, value } => format!("{field} = {}", value.to_jql()),
+            Self::FieldIn { field, values } => field_values(field, values),
+            Self::FieldMatches { field, value } => format!("{field} ~ {}", quote(value)),
+            Self::IsEmpty { field } => format!("{field} is EMPTY"),
         }
     }
 }
 
-impl UserRef {
+impl Value {
+    pub fn text(value: impl Into<String>) -> Self {
+        Self::Text(value.into())
+    }
+
+    pub fn function(value: impl Into<String>) -> Self {
+        Self::Function(value.into())
+    }
+
+    pub fn number(value: u64) -> Self {
+        Self::Number(value)
+    }
+
     fn to_jql(&self) -> String {
         match self {
-            Self::CurrentUser => "currentUser()".to_string(),
-            Self::Named(value) => quote(value),
+            Self::Text(value) => quote(value),
+            Self::Function(value) => value.clone(),
+            Self::Number(value) => value.to_string(),
         }
     }
 }
 
-impl JqlOrder {
+impl Order {
+    pub fn field(field: impl Into<String>, direction: SortDirection) -> Self {
+        Self::Field {
+            field: field.into(),
+            direction,
+        }
+    }
+
+    pub fn raw(value: impl Into<String>) -> Self {
+        Self::Raw(value.into())
+    }
+
     fn to_jql(&self) -> String {
-        format!("ORDER BY {} {}", self.field, self.direction.to_jql())
+        match self {
+            Self::Field { field, direction } => {
+                format!("ORDER BY {} {}", field, direction.to_jql())
+            }
+            Self::Raw(value) => format!("ORDER BY {value}"),
+        }
     }
 }
 
@@ -203,7 +177,25 @@ impl SortDirection {
     }
 }
 
-fn split_order_by(jql: &str) -> (Option<&str>, Option<&str>) {
+impl UserRef {
+    pub fn parse(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("me") || value.eq_ignore_ascii_case("currentUser()") {
+            Self::CurrentUser
+        } else {
+            Self::Named(value.to_string())
+        }
+    }
+
+    pub fn to_value(&self) -> Value {
+        match self {
+            Self::CurrentUser => Value::function("currentUser()"),
+            Self::Named(value) => Value::text(value),
+        }
+    }
+}
+
+/// Splits user JQL so domain modules can combine raw filters with their own ordering rules.
+pub fn split_order_by(jql: &str) -> (Option<&str>, Option<&str>) {
     let lower = jql.to_ascii_lowercase();
     if let Some(index) = lower.rfind(" order by ") {
         (
@@ -212,14 +204,6 @@ fn split_order_by(jql: &str) -> (Option<&str>, Option<&str>) {
         )
     } else {
         (Some(jql), None)
-    }
-}
-
-fn parse_user_ref(value: &str) -> UserRef {
-    if value.eq_ignore_ascii_case("me") || value.eq_ignore_ascii_case("currentUser()") {
-        UserRef::CurrentUser
-    } else {
-        UserRef::Named(value.to_string())
     }
 }
 
@@ -246,24 +230,21 @@ fn quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::SearchArgs;
 
     #[test]
-    fn default_query_has_no_implicit_filters() {
-        let query = IssueQuery::from_search_args(&SearchArgs::default(), None).unwrap();
+    fn empty_query_can_still_sort() {
+        let mut query = Query::new();
+        query.order_by(Order::field("updated", SortDirection::Desc));
 
         assert_eq!(query.to_jql(), "ORDER BY updated DESC");
     }
 
     #[test]
-    fn raw_jql_can_be_combined_with_explicit_filters() {
-        let args = SearchArgs {
-            jql: Some("project = GCCDEV ORDER BY Rank ASC".to_string()),
-            component: vec!["QQMS".to_string()],
-            ..Default::default()
-        };
-
-        let query = IssueQuery::from_search_args(&args, None).unwrap();
+    fn raw_jql_can_be_combined_with_structured_clauses() {
+        let mut query = Query::new();
+        query.push(Clause::raw("project = GCCDEV"));
+        query.push(Clause::field_in("component", vec!["QQMS".to_string()]));
+        query.order_by(Order::field("Rank", SortDirection::Asc));
 
         assert_eq!(
             query.to_jql(),
@@ -272,44 +253,33 @@ mod tests {
     }
 
     #[test]
-    fn board_filter_is_just_another_jql_clause() {
-        let args = SearchArgs {
-            component: vec!["QQMS".to_string()],
-            ..Default::default()
-        };
-
-        let query = IssueQuery::from_search_args(
-            &args,
-            Some(BoardJqlFilter {
-                filter_id: 10492,
-                sub_query: Some("fixVersion is EMPTY".to_string()),
-            }),
-        )
-        .unwrap();
+    fn structured_clauses_are_combined_and_values_are_escaped() {
+        let mut query = Query::new();
+        query.push(Clause::field_equals("project", Value::text("GCCDEV")));
+        query.push(Clause::field_equals(
+            "assignee",
+            UserRef::parse("me").to_value(),
+        ));
+        query.push(Clause::field_in(
+            "status",
+            vec!["In Progress".to_string(), "Ready \"Soon\"".to_string()],
+        ));
+        query.push(Clause::field_in("component", vec!["QQMS".to_string()]));
+        query.push(Clause::field_matches("text", "reporting"));
+        query.push(Clause::raw("statusCategory != Done"));
+        query.order_by(Order::field("updated", SortDirection::Desc));
 
         assert_eq!(
             query.to_jql(),
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY updated DESC"
+            "project = \"GCCDEV\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
         );
     }
 
     #[test]
-    fn structured_filters_are_combined_and_values_are_escaped() {
-        let args = SearchArgs {
-            project: Some("GCCDEV".to_string()),
-            assignee: Some("me".to_string()),
-            status: vec!["In Progress".to_string(), "Ready \"Soon\"".to_string()],
-            component: vec!["QQMS".to_string()],
-            text: Some("reporting".to_string()),
-            open: true,
-            ..Default::default()
-        };
-
-        let query = IssueQuery::from_search_args(&args, None).unwrap();
-
+    fn splits_trailing_order_by_case_insensitively() {
         assert_eq!(
-            query.to_jql(),
-            "project = \"GCCDEV\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND statusCategory != Done ORDER BY updated DESC"
+            split_order_by("project = DEMO ORDER BY Rank ASC"),
+            (Some("project = DEMO"), Some("Rank ASC"))
         );
     }
 }

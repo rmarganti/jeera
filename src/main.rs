@@ -3,6 +3,7 @@ mod client;
 mod commands;
 mod config;
 mod error;
+mod issue_search;
 mod jql;
 mod render;
 

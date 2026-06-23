@@ -1,0 +1,58 @@
+{
+  "issues": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10201",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10201",
+      "key": "DEMO-201",
+      "fields": {
+        "summary": "Investigate webhook retries",
+        "components": [
+          {
+            "self": "https://example.atlassian.net/rest/api/3/component/2002",
+            "id": "2002",
+            "name": "Integrations"
+          }
+        ],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/3",
+          "name": "In Progress"
+        },
+        "issuetype": {
+          "self": "https://example.atlassian.net/rest/api/3/issuetype/10001",
+          "name": "Bug"
+        },
+        "priority": {
+          "self": "https://example.atlassian.net/rest/api/3/priority/2",
+          "name": "High"
+        },
+        "assignee": {
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=abc",
+          "displayName": "Mina Li"
+        },
+        "updated": "2026-06-22T14:45:00.000+0000"
+      }
+    },
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "10202",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10202",
+      "key": "DEMO-202",
+      "fields": {
+        "summary": "Document fallback behavior",
+        "components": [],
+        "status": {
+          "self": "https://example.atlassian.net/rest/api/3/status/10000",
+          "name": "To Do"
+        },
+        "issuetype": {
+          "self": "https://example.atlassian.net/rest/api/3/issuetype/10002",
+          "name": "Task"
+        },
+        "updated": "2026-06-21T09:15:00.000+0000"
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "isLast": true
+}

@@ -20,6 +20,25 @@ const SEARCH_MAX_LIMIT: u32 = 100;
 #[derive(Debug)]
 pub struct PreparedIssueSearch {
     request: SearchIssuesRequest,
+    human_columns: HumanColumns,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchColumn {
+    Key,
+    Status,
+    Summary,
+    Components,
+    Type,
+    Assignee,
+    Priority,
+    Updated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HumanColumns {
+    Default,
+    Custom(Vec<SearchColumn>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +52,18 @@ struct IssueComponent {
     name: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NamedField {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserField {
+    display_name: String,
+}
+
 // Jira response shape requested by `search_fields`; keep these in lockstep.
 #[derive(Debug, Deserialize)]
 struct SearchIssueFields {
@@ -40,6 +71,11 @@ struct SearchIssueFields {
     status: IssueStatus,
     #[serde(default)]
     components: Vec<IssueComponent>,
+    #[serde(rename = "issuetype")]
+    issue_type: Option<NamedField>,
+    priority: Option<NamedField>,
+    assignee: Option<UserField>,
+    updated: Option<String>,
 }
 
 // Domain form of Jira board configuration, before it becomes JQL clauses.
@@ -66,6 +102,14 @@ struct SearchIssueOutput {
     summary: String,
     status_name: String,
     components: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    issue_type_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignee_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    priority_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated: Option<String>,
 }
 
 /// Executes a previously prepared Jira issue search.
@@ -88,10 +132,14 @@ pub fn prepare(client: &JiraClient, args: &SearchArgs) -> Result<PreparedIssueSe
 }
 
 /// Human rendering is search-specific, while JSON rendering stays generic in `render`.
-pub fn render_human(mut writer: impl Write, output: &SearchOutput) -> Result<(), AppError> {
+pub(crate) fn render_human(
+    mut writer: impl Write,
+    output: &SearchOutput,
+    columns: &[SearchColumn],
+) -> Result<(), AppError> {
     if output.issues.is_empty() {
         writeln!(writer, "No issues found.").map_err(|source| AppError::RenderOutput { source })?;
-    } else {
+    } else if columns.is_empty() {
         for issue in &output.issues {
             let components = issue.components.join(", ");
 
@@ -108,6 +156,15 @@ pub fn render_human(mut writer: impl Write, output: &SearchOutput) -> Result<(),
                 }
             )
             .map_err(|source| AppError::RenderOutput { source })?;
+        }
+    } else {
+        for issue in &output.issues {
+            let row = columns
+                .iter()
+                .map(|column| column.render(issue))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            writeln!(writer, "{row}").map_err(|source| AppError::RenderOutput { source })?;
         }
     }
 
@@ -130,6 +187,77 @@ impl PreparedIssueSearch {
     pub fn jql(&self) -> &str {
         &self.request.jql
     }
+
+    pub(crate) fn human_columns(&self) -> &[SearchColumn] {
+        match &self.human_columns {
+            HumanColumns::Default => &[],
+            HumanColumns::Custom(columns) => columns,
+        }
+    }
+}
+
+impl SearchColumn {
+    fn parse(value: &str) -> Result<Self, AppError> {
+        match value.trim() {
+            "key" => Ok(Self::Key),
+            "status" => Ok(Self::Status),
+            "summary" => Ok(Self::Summary),
+            "components" => Ok(Self::Components),
+            "type" => Ok(Self::Type),
+            "assignee" => Ok(Self::Assignee),
+            "priority" => Ok(Self::Priority),
+            "updated" => Ok(Self::Updated),
+            "" => Err(AppError::InvalidSearch {
+                reason: "--columns cannot contain empty values".to_string(),
+            }),
+            other => Err(AppError::InvalidSearch {
+                reason: format!(
+                    "unsupported --columns value {other:?}; expected one of key,status,summary,components,type,assignee,priority,updated"
+                ),
+            }),
+        }
+    }
+
+    fn jira_field(self) -> Option<&'static str> {
+        match self {
+            Self::Key => None,
+            Self::Status => Some("status"),
+            Self::Summary => Some("summary"),
+            Self::Components => Some("components"),
+            Self::Type => Some("issuetype"),
+            Self::Assignee => Some("assignee"),
+            Self::Priority => Some("priority"),
+            Self::Updated => Some("updated"),
+        }
+    }
+
+    fn render(self, issue: &SearchIssueOutput) -> String {
+        match self {
+            Self::Key => issue.key.clone(),
+            Self::Status => issue.status_name.clone(),
+            Self::Summary => issue.summary.clone(),
+            Self::Components => {
+                if issue.components.is_empty() {
+                    "-".to_string()
+                } else {
+                    issue.components.join(", ")
+                }
+            }
+            Self::Type => issue
+                .issue_type_name
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+            Self::Assignee => issue
+                .assignee_display_name
+                .clone()
+                .unwrap_or_else(|| "Unassigned".to_string()),
+            Self::Priority => issue
+                .priority_name
+                .clone()
+                .unwrap_or_else(|| "Unprioritized".to_string()),
+            Self::Updated => issue.updated.clone().unwrap_or_else(|| "-".to_string()),
+        }
+    }
 }
 
 // Internal seam for tests: production uses JiraClient, tests use a closure adapter.
@@ -141,6 +269,7 @@ fn prepare_with_board_source<F>(
 where
     F: FnOnce(u64) -> Result<BoardJqlFilter, AppError>,
 {
+    let human_columns = parse_human_columns(args.columns.as_deref())?;
     validate_search_args(args)?;
 
     let configured_board_id = args.board.or(default_board_id);
@@ -158,10 +287,37 @@ where
             jql,
             next_page_token: args.next_page_token.clone(),
             max_results: Some(args.limit),
-            fields: search_fields(),
+            fields: search_fields(args.json, &human_columns),
             ..Default::default()
         },
+        human_columns,
     })
+}
+
+fn parse_human_columns(value: Option<&str>) -> Result<HumanColumns, AppError> {
+    let Some(value) = value else {
+        return Ok(HumanColumns::Default);
+    };
+
+    let columns = value
+        .split(',')
+        .map(SearchColumn::parse)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if columns.is_empty() {
+        return Err(AppError::InvalidSearch {
+            reason: "--columns cannot be empty".to_string(),
+        });
+    }
+
+    let mut unique = Vec::new();
+    for column in columns {
+        if !unique.contains(&column) {
+            unique.push(column);
+        }
+    }
+
+    Ok(HumanColumns::Custom(unique))
 }
 
 fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
@@ -195,6 +351,7 @@ fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
     validate_optional_value("status-category", args.status_category.as_deref())?;
     validate_optional_value("text", args.text.as_deref())?;
     validate_optional_value("next-page-token", args.next_page_token.as_deref())?;
+    validate_optional_value("columns", args.columns.as_deref())?;
     validate_repeated_values("status", &args.status)?;
     validate_repeated_values("type", &args.issue_type)?;
     validate_repeated_values("component", &args.component)?;
@@ -374,13 +531,36 @@ fn query_from_search_args(args: &SearchArgs, board_filter: Option<BoardJqlFilter
     query
 }
 
-// Fields are part of the search output contract, not a caller option.
-fn search_fields() -> Vec<String> {
-    vec![
+fn search_fields(json: bool, human_columns: &HumanColumns) -> Vec<String> {
+    let mut fields = vec![
         "summary".to_string(),
         "status".to_string(),
         "components".to_string(),
-    ]
+    ];
+
+    let extra_columns: Vec<SearchColumn> = if json {
+        vec![
+            SearchColumn::Type,
+            SearchColumn::Assignee,
+            SearchColumn::Priority,
+            SearchColumn::Updated,
+        ]
+    } else {
+        match human_columns {
+            HumanColumns::Default => Vec::new(),
+            HumanColumns::Custom(columns) => columns.clone(),
+        }
+    };
+
+    for column in extra_columns {
+        if let Some(field) = column.jira_field()
+            && !fields.iter().any(|existing| existing == field)
+        {
+            fields.push(field.to_string());
+        }
+    }
+
+    fields
 }
 
 fn output_from_search_response(response: SearchIssuesResponse<SearchIssueFields>) -> SearchOutput {
@@ -407,6 +587,10 @@ impl SearchIssueOutput {
                 .into_iter()
                 .map(|component| component.name)
                 .collect(),
+            issue_type_name: issue.fields.issue_type.map(|issue_type| issue_type.name),
+            assignee_display_name: issue.fields.assignee.map(|assignee| assignee.display_name),
+            priority_name: issue.fields.priority.map(|priority| priority.name),
+            updated: issue.fields.updated,
         }
     }
 }
@@ -509,9 +693,32 @@ mod tests {
                 assignee: Some("me".to_string()),
                 ..Default::default()
             },
+            SearchArgs {
+                columns: Some(" ".to_string()),
+                assignee: Some("me".to_string()),
+                ..Default::default()
+            },
         ] {
             let error = prepare_with_board_source(&args, None, |_| unreachable!()).unwrap_err();
-            assert!(error.to_string().contains("cannot be empty"));
+            assert!(error.to_string().contains("cannot"));
+        }
+    }
+
+    #[test]
+    fn search_rejects_invalid_columns() {
+        for columns in ["key,,summary", "key,unknown"] {
+            let error = prepare_with_board_source(
+                &SearchArgs {
+                    assignee: Some("me".to_string()),
+                    columns: Some(columns.to_string()),
+                    ..Default::default()
+                },
+                None,
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+
+            assert!(error.to_string().contains("--columns"));
         }
     }
 
@@ -659,6 +866,50 @@ mod tests {
     }
 
     #[test]
+    fn search_request_fetches_only_selected_extra_human_columns() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            columns: Some("key,type,status,assignee,updated,summary".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().fields,
+            vec![
+                "summary",
+                "status",
+                "components",
+                "issuetype",
+                "assignee",
+                "updated"
+            ]
+        );
+    }
+
+    #[test]
+    fn search_json_request_fetches_all_supported_columns_consistently() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            json: true,
+            columns: Some("key,priority".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().fields,
+            vec![
+                "summary",
+                "status",
+                "components",
+                "issuetype",
+                "assignee",
+                "priority",
+                "updated"
+            ]
+        );
+    }
+
+    #[test]
     fn search_request_uses_pagination_args() {
         let args = SearchArgs {
             assignee: Some("me".to_string()),
@@ -778,6 +1029,23 @@ mod tests {
     }
 
     #[test]
+    fn deserializes_selected_optional_columns_when_present() {
+        let response: SearchIssuesResponse<SearchIssueFields> =
+            serde_json::from_str(&fixture("search-columns.json")).unwrap();
+
+        let output = output_from_search_response(response);
+
+        assert_eq!(output.issues[0].issue_type_name.as_deref(), Some("Bug"));
+        assert_eq!(
+            output.issues[0].assignee_display_name.as_deref(),
+            Some("Mina Li")
+        );
+        assert_eq!(output.issues[0].priority_name.as_deref(), Some("High"));
+        assert_eq!(output.issues[1].assignee_display_name.as_deref(), None);
+        assert_eq!(output.issues[1].priority_name.as_deref(), None);
+    }
+
+    #[test]
     fn deserialization_fails_when_required_summary_is_missing() {
         let error = serde_json::from_str::<SearchIssuesResponse<SearchIssueFields>>(&fixture(
             "search-missing-summary.json",
@@ -804,7 +1072,7 @@ mod tests {
         let output = output_from_search_response(response);
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output).unwrap();
+        render_human(&mut rendered, &output, &[]).unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
@@ -818,13 +1086,44 @@ mod tests {
     }
 
     #[test]
+    fn render_human_uses_selected_columns_and_placeholders_for_missing_values() {
+        let response: SearchIssuesResponse<SearchIssueFields> =
+            serde_json::from_str(&fixture("search-columns.json")).unwrap();
+        let output = output_from_search_response(response);
+        let mut rendered = Vec::new();
+
+        render_human(
+            &mut rendered,
+            &output,
+            &[
+                SearchColumn::Key,
+                SearchColumn::Type,
+                SearchColumn::Status,
+                SearchColumn::Assignee,
+                SearchColumn::Priority,
+                SearchColumn::Updated,
+                SearchColumn::Summary,
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            concat!(
+                "DEMO-201 | Bug | In Progress | Mina Li | High | 2026-06-22T14:45:00.000+0000 | Investigate webhook retries\n",
+                "DEMO-202 | Task | To Do | Unassigned | Unprioritized | 2026-06-21T09:15:00.000+0000 | Document fallback behavior\n"
+            )
+        );
+    }
+
+    #[test]
     fn render_human_omits_empty_components_suffix() {
         let response: SearchIssuesResponse<SearchIssueFields> =
             serde_json::from_str(&fixture("search-no-components.json")).unwrap();
         let output = output_from_search_response(response);
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output).unwrap();
+        render_human(&mut rendered, &output, &[]).unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
@@ -841,7 +1140,7 @@ mod tests {
         };
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output).unwrap();
+        render_human(&mut rendered, &output, &[]).unwrap();
 
         assert_eq!(String::from_utf8(rendered).unwrap(), "No issues found.\n");
     }
@@ -855,7 +1154,7 @@ mod tests {
         };
         let mut rendered = Vec::new();
 
-        render_human(&mut rendered, &output).unwrap();
+        render_human(&mut rendered, &output, &[]).unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
@@ -907,6 +1206,22 @@ mod tests {
                 "}\n"
             )
         );
+    }
+
+    #[test]
+    fn render_json_emits_additive_optional_fields_when_available() {
+        let response: SearchIssuesResponse<SearchIssueFields> =
+            serde_json::from_str(&fixture("search-columns.json")).unwrap();
+        let output = output_from_search_response(response);
+        let mut rendered = Vec::new();
+
+        render::render_json(&mut rendered, &output).unwrap();
+
+        let rendered = String::from_utf8(rendered).unwrap();
+        assert!(rendered.contains("\"issue_type_name\": \"Bug\""));
+        assert!(rendered.contains("\"assignee_display_name\": \"Mina Li\""));
+        assert!(rendered.contains("\"priority_name\": \"High\""));
+        assert!(rendered.contains("\"updated\": \"2026-06-22T14:45:00.000+0000\""));
     }
 
     #[test]

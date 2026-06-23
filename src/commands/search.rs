@@ -26,7 +26,7 @@ fn run_with_writers(
     if args.json {
         render::render_json(&mut stdout, &output)?;
     } else {
-        issue_search::render_human(&mut stdout, &output)?;
+        issue_search::render_human(&mut stdout, &output, prepared.human_columns())?;
     }
 
     Ok(())

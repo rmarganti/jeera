@@ -84,6 +84,13 @@ pub struct SearchArgs {
 
     #[arg(
         long,
+        value_name = "COLS",
+        help = "Comma-separated human output columns: key,status,summary,components,type,assignee,priority,updated"
+    )]
+    pub columns: Option<String>,
+
+    #[arg(
+        long,
         help = "Print the final JQL to stderr before executing the search"
     )]
     pub debug_jql: bool,
@@ -123,6 +130,7 @@ impl Default for SearchArgs {
             open: false,
             limit: 50,
             next_page_token: None,
+            columns: None,
             debug_jql: false,
             sort: "updated".to_string(),
             asc: false,
@@ -168,6 +176,29 @@ mod tests {
             Command::Search(args) => {
                 assert_eq!(args.board, Some(215));
                 assert_eq!(args.query.as_deref(), Some("reporting"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_accepts_configurable_columns() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "search",
+            "--project",
+            "GCCDEV",
+            "--columns",
+            "key,type,status,assignee,updated,summary",
+        ]);
+
+        match cli.command {
+            Command::Search(args) => {
+                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(
+                    args.columns.as_deref(),
+                    Some("key,type,status,assignee,updated,summary")
+                );
             }
             other => panic!("expected search command, got {other:?}"),
         }

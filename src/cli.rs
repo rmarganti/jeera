@@ -40,8 +40,8 @@ pub struct SearchArgs {
     )]
     pub jql: Option<String>,
 
-    #[arg(long)]
-    pub board: Option<u64>,
+    #[arg(long, value_name = "ID|NAME", help = "Board id or exact board name")]
+    pub board: Option<String>,
 
     #[arg(long)]
     pub project: Option<String>,
@@ -177,7 +177,26 @@ mod tests {
 
         match cli.command {
             Command::Search(args) => {
-                assert_eq!(args.board, Some(215));
+                assert_eq!(args.board.as_deref(), Some("215"));
+                assert_eq!(args.query.as_deref(), Some("reporting"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_accepts_named_board_references() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "search",
+            "--board",
+            "GCCDEV Kanban Board",
+            "reporting",
+        ]);
+
+        match cli.command {
+            Command::Search(args) => {
+                assert_eq!(args.board.as_deref(), Some("GCCDEV Kanban Board"));
                 assert_eq!(args.query.as_deref(), Some("reporting"));
             }
             other => panic!("expected search command, got {other:?}"),

@@ -6,7 +6,10 @@
 use crate::cli::SearchArgs;
 use crate::client::{
     JiraClient,
-    types::{GetBoardConfigurationRequest, SearchIssuesRequest, SearchIssuesResponse},
+    types::{
+        BoardResponse, GetBoardConfigurationRequest, ListBoardsRequest, SearchIssuesRequest,
+        SearchIssuesResponse,
+    },
 };
 use crate::error::AppError;
 use crate::jql::{self, Clause, Order, Query, SortDirection, UserRef, Value};
@@ -86,6 +89,12 @@ struct BoardJqlFilter {
     sub_query: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BoardSelector {
+    Id(u64),
+    Name(String),
+}
+
 /// jeera-owned search output; this is the stable interface for JSON and human rendering.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -127,9 +136,12 @@ pub fn execute_prepared(
 
 /// Builds the Jira request without executing it; useful as the module's narrow test surface.
 pub fn prepare(client: &JiraClient, args: &SearchArgs) -> Result<PreparedIssueSearch, AppError> {
-    prepare_with_board_source(args, client.default_board_id(), |board_id| {
-        board_filter(client, board_id)
-    })
+    prepare_with_board_source(
+        args,
+        client.default_board_id(),
+        |board_name| resolve_board_name(client, board_name),
+        |board_id| board_filter(client, board_id),
+    )
 }
 
 /// Human rendering is search-specific, while JSON rendering stays generic in `render`.
@@ -327,19 +339,22 @@ fn render_components(issue: &SearchIssueOutput) -> String {
     }
 }
 
-// Internal seam for tests: production uses JiraClient, tests use a closure adapter.
-fn prepare_with_board_source<F>(
+// Internal seam for tests: production uses JiraClient, tests use closure adapters.
+fn prepare_with_board_source<R, F>(
     args: &SearchArgs,
     default_board_id: Option<u64>,
+    resolve_board_name: R,
     load_board_filter: F,
 ) -> Result<PreparedIssueSearch, AppError>
 where
+    R: FnMut(&str) -> Result<u64, AppError>,
     F: FnOnce(u64) -> Result<BoardJqlFilter, AppError>,
 {
     let human_columns = parse_human_columns(args.columns.as_deref())?;
     validate_search_args(args)?;
 
-    let configured_board_id = args.board.or(default_board_id);
+    let configured_board_id =
+        resolve_board_id(args.board.as_deref(), default_board_id, resolve_board_name)?;
     if configured_board_id.is_none() && !has_explicit_search_restriction(args) {
         return Err(AppError::InvalidSearch {
             reason: "provide at least one search restriction, such as QUERY, --jql, --board, --project, --assignee, --component, --status, --label, --text, or configure default_board_id".to_string(),
@@ -412,6 +427,7 @@ fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
     validate_limit(args.limit)?;
     validate_optional_value("query", args.query.as_deref())?;
     validate_optional_value("jql", args.jql.as_deref())?;
+    validate_optional_value("board", args.board.as_deref())?;
     validate_optional_value("project", args.project.as_deref())?;
     validate_optional_value("assignee", args.assignee.as_deref())?;
     validate_optional_value("reporter", args.reporter.as_deref())?;
@@ -474,6 +490,78 @@ fn validate_sort_field(sort: &str) -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+fn resolve_board_id<R>(
+    board: Option<&str>,
+    default_board_id: Option<u64>,
+    mut resolve_board_name: R,
+) -> Result<Option<u64>, AppError>
+where
+    R: FnMut(&str) -> Result<u64, AppError>,
+{
+    match board.map(str::trim) {
+        Some(board) => match parse_board_selector(board)? {
+            BoardSelector::Id(board_id) => Ok(Some(board_id)),
+            BoardSelector::Name(board_name) => resolve_board_name(&board_name).map(Some),
+        },
+        None => Ok(default_board_id),
+    }
+}
+
+fn parse_board_selector(board: &str) -> Result<BoardSelector, AppError> {
+    if board.is_empty() {
+        return Err(AppError::InvalidSearch {
+            reason: "--board cannot be empty".to_string(),
+        });
+    }
+
+    match board.parse::<u64>() {
+        Ok(board_id) => Ok(BoardSelector::Id(board_id)),
+        Err(_) => Ok(BoardSelector::Name(board.to_string())),
+    }
+}
+
+fn resolve_board_name(client: &JiraClient, board_name: &str) -> Result<u64, AppError> {
+    let response = client
+        .list_boards(&ListBoardsRequest::default())
+        .map_err(|source| AppError::ExecuteBoards { source })?;
+
+    find_board_id_by_name(&response.values, board_name)
+}
+
+fn find_board_id_by_name(boards: &[BoardResponse], board_name: &str) -> Result<u64, AppError> {
+    let exact_matches = boards
+        .iter()
+        .filter(|board| board.name == board_name)
+        .collect::<Vec<_>>();
+    let matches = if exact_matches.is_empty() {
+        boards
+            .iter()
+            .filter(|board| board.name.eq_ignore_ascii_case(board_name))
+            .collect::<Vec<_>>()
+    } else {
+        exact_matches
+    };
+
+    match matches.as_slice() {
+        [] => Err(AppError::InvalidSearch {
+            reason: format!(
+                "no Jira board named {board_name:?} found; try `jeera boards` to discover available boards or pass a numeric --board ID"
+            ),
+        }),
+        [board] => Ok(board.id),
+        boards => Err(AppError::InvalidSearch {
+            reason: format!(
+                "board name {board_name:?} is ambiguous; matching board ids: {}. Try `jeera boards` or pass a numeric --board ID",
+                boards
+                    .iter()
+                    .map(|board| board.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }),
+    }
 }
 
 fn board_filter(client: &JiraClient, board_id: u64) -> Result<BoardJqlFilter, AppError> {
@@ -706,13 +794,18 @@ mod tests {
     }
 
     fn prepare_without_board(args: &SearchArgs) -> PreparedIssueSearch {
-        prepare_with_board_source(args, None, |_| unreachable!()).unwrap()
+        prepare_with_board_source(args, None, |_| unreachable!(), |_| unreachable!()).unwrap()
     }
 
     #[test]
     fn search_requires_an_explicit_or_configured_restriction() {
-        let error = prepare_with_board_source(&SearchArgs::default(), None, |_| unreachable!())
-            .unwrap_err();
+        let error = prepare_with_board_source(
+            &SearchArgs::default(),
+            None,
+            |_| unreachable!(),
+            |_| unreachable!(),
+        )
+        .unwrap_err();
 
         assert!(matches!(error, AppError::InvalidSearch { .. }));
     }
@@ -726,6 +819,7 @@ mod tests {
                 ..Default::default()
             },
             None,
+            |_| unreachable!(),
             |_| unreachable!(),
         )
         .unwrap_err();
@@ -746,6 +840,7 @@ mod tests {
             },
             None,
             |_| unreachable!(),
+            |_| unreachable!(),
         )
         .unwrap_err();
 
@@ -758,6 +853,10 @@ mod tests {
     #[test]
     fn search_rejects_empty_string_filters() {
         for args in [
+            SearchArgs {
+                board: Some("   ".to_string()),
+                ..Default::default()
+            },
             SearchArgs {
                 project: Some("   ".to_string()),
                 ..Default::default()
@@ -797,7 +896,9 @@ mod tests {
                 ..Default::default()
             },
         ] {
-            let error = prepare_with_board_source(&args, None, |_| unreachable!()).unwrap_err();
+            let error =
+                prepare_with_board_source(&args, None, |_| unreachable!(), |_| unreachable!())
+                    .unwrap_err();
             assert!(error.to_string().contains("cannot"));
         }
     }
@@ -812,6 +913,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
+                |_| unreachable!(),
                 |_| unreachable!(),
             )
             .unwrap_err();
@@ -840,7 +942,9 @@ mod tests {
                 ..Default::default()
             },
         ] {
-            let error = prepare_with_board_source(&args, None, |_| unreachable!()).unwrap_err();
+            let error =
+                prepare_with_board_source(&args, None, |_| unreachable!(), |_| unreachable!())
+                    .unwrap_err();
             assert!(error.to_string().contains("cannot contain empty values"));
         }
     }
@@ -856,11 +960,123 @@ mod tests {
                 },
                 None,
                 |_| unreachable!(),
+                |_| unreachable!(),
             )
             .unwrap_err();
 
             assert!(error.to_string().contains("--sort"));
         }
+    }
+
+    #[test]
+    fn numeric_board_reference_bypasses_name_resolution() {
+        let prepared = prepare_with_board_source(
+            &SearchArgs {
+                board: Some("215".to_string()),
+                ..Default::default()
+            },
+            None,
+            |_| panic!("numeric board ids should not invoke board-name resolution"),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn named_board_reference_resolves_before_loading_board_filter() {
+        let prepared = prepare_with_board_source(
+            &SearchArgs {
+                board: Some("GCCDEV Kanban Board".to_string()),
+                component: vec!["QQMS".to_string()],
+                ..Default::default()
+            },
+            None,
+            |board_name| {
+                assert_eq!(board_name, "GCCDEV Kanban Board");
+                Ok(215)
+            },
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn board_name_matching_is_case_insensitive_when_needed() {
+        let boards = vec![BoardResponse {
+            id: 215,
+            name: "GCCDEV Kanban Board".to_string(),
+            board_type: "kanban".to_string(),
+            location: None,
+        }];
+
+        assert_eq!(
+            find_board_id_by_name(&boards, "gccdev kanban board").unwrap(),
+            215
+        );
+    }
+
+    #[test]
+    fn unknown_board_name_is_reported_clearly() {
+        let boards = vec![BoardResponse {
+            id: 215,
+            name: "GCCDEV Kanban Board".to_string(),
+            board_type: "kanban".to_string(),
+            location: None,
+        }];
+
+        let error = find_board_id_by_name(&boards, "Missing Board").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: no Jira board named \"Missing Board\" found; try `jeera boards` to discover available boards or pass a numeric --board ID"
+        );
+    }
+
+    #[test]
+    fn ambiguous_board_name_is_reported_clearly() {
+        let boards = vec![
+            BoardResponse {
+                id: 215,
+                name: "Team Board".to_string(),
+                board_type: "kanban".to_string(),
+                location: None,
+            },
+            BoardResponse {
+                id: 314,
+                name: "Team Board".to_string(),
+                board_type: "scrum".to_string(),
+                location: None,
+            },
+        ];
+
+        let error = find_board_id_by_name(&boards, "Team Board").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: board name \"Team Board\" is ambiguous; matching board ids: 215, 314. Try `jeera boards` or pass a numeric --board ID"
+        );
     }
 
     #[test]
@@ -898,6 +1114,7 @@ mod tests {
                 ..Default::default()
             },
             Some(215),
+            |_| unreachable!(),
             |board_id| {
                 assert_eq!(board_id, 215);
                 Ok(BoardJqlFilter {
@@ -963,6 +1180,7 @@ mod tests {
                 ..Default::default()
             },
             Some(215),
+            |_| unreachable!(),
             |board_id| {
                 assert_eq!(board_id, 215);
                 Ok(BoardJqlFilter {
@@ -999,6 +1217,7 @@ mod tests {
                 ..Default::default()
             },
             Some(215),
+            |_| unreachable!(),
             |board_id| {
                 assert_eq!(board_id, 215);
                 Ok(BoardJqlFilter {
@@ -1118,6 +1337,7 @@ mod tests {
                 ..Default::default()
             },
             Some(215),
+            |_| unreachable!(),
             |board_id| {
                 assert_eq!(board_id, 215);
                 Ok(BoardJqlFilter {
@@ -1155,13 +1375,18 @@ mod tests {
             component: vec!["QQMS".to_string()],
             ..Default::default()
         };
-        let prepared = prepare_with_board_source(&args, Some(215), |board_id| {
-            assert_eq!(board_id, 215);
-            Ok(BoardJqlFilter {
-                filter_id: 10492,
-                sub_query: Some("fixVersion is EMPTY".to_string()),
-            })
-        })
+        let prepared = prepare_with_board_source(
+            &args,
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
         .unwrap();
 
         assert_eq!(
@@ -1177,13 +1402,18 @@ mod tests {
             component: vec!["QQMS".to_string()],
             ..Default::default()
         };
-        let prepared = prepare_with_board_source(&args, Some(215), |board_id| {
-            assert_eq!(board_id, 215);
-            Ok(BoardJqlFilter {
-                filter_id: 10492,
-                sub_query: Some("fixVersion is EMPTY".to_string()),
-            })
-        })
+        let prepared = prepare_with_board_source(
+            &args,
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
         .unwrap();
 
         assert_eq!(

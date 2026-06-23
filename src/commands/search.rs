@@ -51,9 +51,9 @@ fn build_next_page_command(args: &SearchArgs, next_page_token: &str) -> String {
         parts.push("--jql".to_string());
         parts.push(shell_quote(jql));
     }
-    if let Some(board) = args.board {
+    if let Some(board) = &args.board {
         parts.push("--board".to_string());
-        parts.push(board.to_string());
+        parts.push(shell_quote(board));
     }
     if let Some(project) = &args.project {
         parts.push("--project".to_string());
@@ -211,7 +211,7 @@ mod tests {
     fn build_next_page_command_preserves_filters_and_quotes_spaces() {
         let args = SearchArgs {
             query: Some("release blockers".to_string()),
-            board: Some(215),
+            board: Some("215".to_string()),
             project: Some("GCCDEV".to_string()),
             status: vec!["In Progress".to_string()],
             component: vec!["Core Platform".to_string()],
@@ -225,6 +225,20 @@ mod tests {
         assert_eq!(
             build_next_page_command(&args, "token with spaces"),
             "jeera search --board 215 --project GCCDEV --status 'In Progress' --component 'Core Platform' --limit 1 --columns 'key,status,summary' --sort rank --desc --next-page-token 'token with spaces' 'release blockers'"
+        );
+    }
+
+    #[test]
+    fn build_next_page_command_quotes_named_board_references() {
+        let args = SearchArgs {
+            board: Some("GCCDEV Kanban Board".to_string()),
+            limit: 2,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_next_page_command(&args, "next-token"),
+            "jeera search --board 'GCCDEV Kanban Board' --limit 2 --next-page-token next-token"
         );
     }
 

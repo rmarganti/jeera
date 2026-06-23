@@ -80,7 +80,7 @@ Options:
 
 - `--json`
 - `--jql <JQL>` combine raw JQL with structured filters
-- `--board <ID>` use a board filter; falls back to `default_board_id`
+- `--board <ID|NAME>` use a board filter by numeric id or exact board name; falls back to `default_board_id`
 - `--project <KEY>`
 - `--assignee <USER|me>`
 - `--unassigned`
@@ -114,6 +114,7 @@ Examples:
 jeera search reporting
 jeera search --assignee me --open
 jeera search --board 215 --columns key,type,status,assignee,updated,summary --limit 5
+jeera search --board 'GCCDEV Kanban Board' --limit 5
 jeera search --board 215 --sort rank --desc --limit 5
 jeera search --project GCCDEV --component QQMS --debug-jql
 jeera search --jql 'project = GCCDEV' --status 'In Progress' --json

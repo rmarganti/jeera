@@ -1,6 +1,7 @@
 use crate::client::JiraAuth;
 use crate::client::JiraClientConfig;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -18,6 +19,36 @@ pub struct Settings {
     pub auth: AuthSettings,
     pub http_timeout: Duration,
     pub default_board_id: Option<u64>,
+    pub searches: BTreeMap<String, SearchProfileSettings>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct SearchProfileSettings {
+    pub board: Option<String>,
+    pub jql: Option<String>,
+    pub project: Option<String>,
+    pub assignee: Option<String>,
+    #[serde(default)]
+    pub unassigned: bool,
+    pub reporter: Option<String>,
+    #[serde(default)]
+    pub status: Vec<String>,
+    pub status_category: Option<String>,
+    #[serde(default, alias = "issue_type")]
+    pub issue_type: Vec<String>,
+    #[serde(default)]
+    pub component: Vec<String>,
+    #[serde(default)]
+    pub label: Vec<String>,
+    pub text: Option<String>,
+    #[serde(default)]
+    pub open: bool,
+    pub limit: Option<u32>,
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub asc: bool,
+    #[serde(default)]
+    pub desc: bool,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +97,9 @@ pub enum ConfigError {
 
     #[error("invalid http_timeout_seconds {value}: {reason}")]
     InvalidHttpTimeout { value: u64, reason: &'static str },
+
+    #[error("invalid search profile {name:?}: {reason}")]
+    InvalidSearchProfile { name: String, reason: &'static str },
 }
 
 // ----------------------------------------------------------------
@@ -78,6 +112,7 @@ impl fmt::Debug for Settings {
             .field("base_url", &self.base_url)
             .field("http_timeout_seconds", &self.http_timeout.as_secs())
             .field("default_board_id", &self.default_board_id)
+            .field("searches", &self.searches)
             .field("auth", &self.auth)
             .finish()
     }
@@ -140,6 +175,7 @@ impl Settings {
             auth,
             timeout: self.http_timeout,
             default_board_id: self.default_board_id,
+            searches: self.searches,
         }
     }
 }
@@ -155,6 +191,8 @@ struct RawSettings {
     http_timeout_seconds: u64,
     #[serde(default)]
     default_board_id: Option<u64>,
+    #[serde(default)]
+    searches: BTreeMap<String, SearchProfileSettings>,
     auth: AuthSettings,
 }
 
@@ -164,11 +202,14 @@ impl RawSettings {
         validate_auth(&self.auth)?;
         let http_timeout = validate_http_timeout(self.http_timeout_seconds)?;
 
+        validate_searches(&self.searches)?;
+
         Ok(Settings {
             base_url,
             auth: self.auth,
             http_timeout,
             default_board_id: self.default_board_id,
+            searches: self.searches,
         })
     }
 }
@@ -259,6 +300,28 @@ fn validate_auth(auth: &AuthSettings) -> Result<(), ConfigError> {
     Ok(())
 }
 
+fn validate_searches(
+    searches: &BTreeMap<String, SearchProfileSettings>,
+) -> Result<(), ConfigError> {
+    for (name, profile) in searches {
+        if name.trim().is_empty() {
+            return Err(ConfigError::InvalidSearchProfile {
+                name: name.clone(),
+                reason: "profile names must not be empty",
+            });
+        }
+
+        if profile.asc && profile.desc {
+            return Err(ConfigError::InvalidSearchProfile {
+                name: name.clone(),
+                reason: "cannot set both asc and desc",
+            });
+        }
+    }
+
+    Ok(())
+}
+
 // ----------------------------------------------------------------
 // Config path resolution
 // ----------------------------------------------------------------
@@ -303,6 +366,7 @@ mod tests {
             base_url: base_url.to_string(),
             http_timeout_seconds,
             default_board_id: None,
+            searches: BTreeMap::new(),
             auth,
         }
     }
@@ -498,6 +562,57 @@ mod tests {
         let settings = settings.validate().unwrap();
 
         assert_eq!(settings.default_board_id, Some(215));
+    }
+
+    #[test]
+    fn accepts_search_profiles() {
+        let mut settings = raw_settings(
+            "https://example.atlassian.net",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        );
+        settings.searches.insert(
+            "qqms".to_string(),
+            SearchProfileSettings {
+                project: Some("GCCDEV".to_string()),
+                component: vec!["QQMS".to_string()],
+                limit: Some(25),
+                ..Default::default()
+            },
+        );
+
+        let settings = settings.validate().unwrap();
+
+        assert_eq!(settings.searches.len(), 1);
+        let profile = settings.searches.get("qqms").unwrap();
+        assert_eq!(profile.project.as_deref(), Some("GCCDEV"));
+        assert_eq!(profile.component, vec!["QQMS"]);
+        assert_eq!(profile.limit, Some(25));
+    }
+
+    #[test]
+    fn rejects_conflicting_profile_sort_directions() {
+        let mut settings = raw_settings(
+            "https://example.atlassian.net",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        );
+        settings.searches.insert(
+            "qqms".to_string(),
+            SearchProfileSettings {
+                asc: true,
+                desc: true,
+                ..Default::default()
+            },
+        );
+
+        let error = settings.validate().unwrap_err();
+
+        assert!(matches!(error, ConfigError::InvalidSearchProfile { .. }));
     }
 
     #[test]

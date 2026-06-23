@@ -19,6 +19,7 @@ use std::io::Write;
 
 const SEARCH_MIN_LIMIT: u32 = 1;
 const SEARCH_MAX_LIMIT: u32 = 100;
+const DEFAULT_SEARCH_LIMIT: u32 = 50;
 
 /// Prepared search intent after validation, board resolution, JQL assembly, and field selection.
 #[derive(Debug)]
@@ -368,7 +369,7 @@ where
         request: SearchIssuesRequest {
             jql,
             next_page_token: args.next_page_token.clone(),
-            max_results: Some(args.limit),
+            max_results: Some(args.limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
             fields: search_fields(args.json, &human_columns),
             ..Default::default()
         },
@@ -424,7 +425,7 @@ fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
 }
 
 fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
-    validate_limit(args.limit)?;
+    validate_limit(args.limit.unwrap_or(DEFAULT_SEARCH_LIMIT))?;
     validate_optional_value("query", args.query.as_deref())?;
     validate_optional_value("jql", args.jql.as_deref())?;
     validate_optional_value("board", args.board.as_deref())?;
@@ -815,7 +816,7 @@ mod tests {
         let error = prepare_with_board_source(
             &SearchArgs {
                 assignee: Some("me".to_string()),
-                limit: 0,
+                limit: Some(0),
                 ..Default::default()
             },
             None,
@@ -835,7 +836,7 @@ mod tests {
         let error = prepare_with_board_source(
             &SearchArgs {
                 assignee: Some("me".to_string()),
-                limit: 101,
+                limit: Some(101),
                 ..Default::default()
             },
             None,
@@ -1303,7 +1304,7 @@ mod tests {
     fn search_request_uses_pagination_args() {
         let args = SearchArgs {
             assignee: Some("me".to_string()),
-            limit: 25,
+            limit: Some(25),
             next_page_token: Some("token-123".to_string()),
             ..Default::default()
         };

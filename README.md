@@ -43,6 +43,41 @@ Read-only Jira CLI for listing boards, searching issues, and viewing issue detai
 - `auth`: `basic` or `bearer`
 - `http_timeout_seconds`: optional, defaults to `30`
 - `default_board_id`: optional board id used by `jeera search` when `--board` is omitted
+- `searches`: optional map of saved search profiles for `jeera search --profile <NAME>`
+
+### Saved search profiles
+
+Profiles let you preconfigure common `search` filters in config and then override or extend them from the CLI.
+
+```json
+{
+  "base_url": "https://your-domain.atlassian.net",
+  "default_board_id": 215,
+  "searches": {
+    "qqms": {
+      "project": "GCCDEV",
+      "component": ["QQMS"],
+      "open": true,
+      "sort": "rank",
+      "asc": true,
+      "limit": 25
+    }
+  },
+  "auth": {
+    "type": "bearer",
+    "token": "<token>"
+  }
+}
+```
+
+Supported profile fields mirror `jeera search`: `board`, `jql`, `project`, `assignee`, `unassigned`, `reporter`, `status`, `status_category`, `issue_type`, `component`, `label`, `text`, `open`, `limit`, `sort`, `asc`, `desc`.
+
+Merge behavior:
+
+- Profile values load first.
+- Explicit CLI scalar flags override profile values.
+- Repeated CLI flags like `--status`, `--component`, `--label`, and `--type` append to profile values.
+- `default_board_id` still applies if neither the profile nor the CLI specifies a board.
 
 ## Commands
 
@@ -79,6 +114,7 @@ Search requires at least one explicit restriction, or a configured `default_boar
 Options:
 
 - `--json`
+- `--profile <NAME>` load a saved search profile from config
 - `--jql <JQL>` combine raw JQL with structured filters
 - `--board <ID|NAME>` use a board filter by numeric id or exact board name; falls back to `default_board_id`
 - `--project <KEY>`
@@ -112,6 +148,8 @@ Examples:
 
 ```sh
 jeera search reporting
+jeera search --profile qqms
+jeera search --profile qqms --status 'In Progress'
 jeera search --assignee me --open
 jeera search --board 215 --columns key,type,status,assignee,updated,summary --limit 5
 jeera search --board 'GCCDEV Kanban Board' --limit 5

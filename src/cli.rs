@@ -23,10 +23,13 @@ pub struct BoardsArgs {
     pub json: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone, Default)]
 pub struct SearchArgs {
     #[arg(long)]
     pub json: bool,
+
+    #[arg(long)]
+    pub profile: Option<String>,
 
     #[arg(
         value_name = "QUERY",
@@ -76,8 +79,8 @@ pub struct SearchArgs {
     #[arg(long)]
     pub open: bool,
 
-    #[arg(long, default_value_t = 50)]
-    pub limit: u32,
+    #[arg(long)]
+    pub limit: Option<u32>,
 
     #[arg(long)]
     pub next_page_token: Option<String>,
@@ -111,37 +114,6 @@ pub struct SearchArgs {
     pub desc: bool,
 }
 
-// Keep this in sync with clap defaults above (`default_value_t` / `default_value`).
-// Tests construct SearchArgs directly, so derive(Default) would not honor clap's runtime defaults.
-impl Default for SearchArgs {
-    fn default() -> Self {
-        Self {
-            json: false,
-            query: None,
-            jql: None,
-            board: None,
-            project: None,
-            assignee: None,
-            unassigned: false,
-            reporter: None,
-            status: Vec::new(),
-            status_category: None,
-            issue_type: Vec::new(),
-            component: Vec::new(),
-            label: Vec::new(),
-            text: None,
-            open: false,
-            limit: 50,
-            next_page_token: None,
-            columns: None,
-            debug_jql: false,
-            sort: None,
-            asc: false,
-            desc: false,
-        }
-    }
-}
-
 #[derive(Debug, Args, Default)]
 pub struct ShowArgs {
     pub issue_key: String,
@@ -165,6 +137,7 @@ mod tests {
         match cli.command {
             Command::Search(args) => {
                 assert_eq!(args.query.as_deref(), Some("reporting"));
+                assert_eq!(args.profile, None);
                 assert_eq!(args.text, None);
             }
             other => panic!("expected search command, got {other:?}"),
@@ -228,10 +201,20 @@ mod tests {
 
     #[test]
     fn search_accepts_optional_sort_and_direction_flags() {
-        let cli = Cli::parse_from(["jeera", "search", "--sort", "rank", "--desc", "demo"]);
+        let cli = Cli::parse_from([
+            "jeera",
+            "search",
+            "--profile",
+            "qqms",
+            "--sort",
+            "rank",
+            "--desc",
+            "demo",
+        ]);
 
         match cli.command {
             Command::Search(args) => {
+                assert_eq!(args.profile.as_deref(), Some("qqms"));
                 assert_eq!(args.sort.as_deref(), Some("rank"));
                 assert!(args.desc);
                 assert_eq!(args.query.as_deref(), Some("demo"));

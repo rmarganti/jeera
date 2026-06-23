@@ -28,6 +28,7 @@ fn run_with_writer(
 mod tests {
     use super::*;
     use crate::client::{JiraAuth, JiraClient, JiraClientConfig};
+    use std::collections::BTreeMap;
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -76,6 +77,7 @@ mod tests {
             },
             timeout: Duration::from_secs(5),
             default_board_id: None,
+            searches: BTreeMap::new(),
         })
     }
 

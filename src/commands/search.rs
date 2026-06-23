@@ -3,6 +3,8 @@ use crate::client::JiraClient;
 use crate::{error::AppError, issue_search, render};
 use std::io::{self, Write};
 
+const DEFAULT_SEARCH_LIMIT: u32 = 50;
+
 // Thin command adapter: delegate search behavior to the domain module, choose output mode here.
 pub fn run(client: &JiraClient, args: &SearchArgs) -> Result<(), AppError> {
     run_with_writers(client, args, io::stdout().lock(), io::stderr().lock())
@@ -14,16 +16,17 @@ fn run_with_writers(
     mut stdout: impl Write,
     mut stderr: impl Write,
 ) -> Result<(), AppError> {
-    let prepared = issue_search::prepare(client, args)?;
+    let effective_args = merge_search_profile(client, args)?;
+    let prepared = issue_search::prepare(client, &effective_args)?;
 
-    if args.debug_jql {
+    if effective_args.debug_jql {
         writeln!(stderr, "Final JQL: {}", prepared.jql())
             .map_err(|source| AppError::RenderOutput { source })?;
     }
 
     let output = issue_search::execute_prepared(client, &prepared)?;
 
-    if args.json {
+    if effective_args.json {
         render::render_json(&mut stdout, &output)?;
     } else {
         let next_page_command = output
@@ -41,11 +44,80 @@ fn run_with_writers(
     Ok(())
 }
 
+fn merge_search_profile(client: &JiraClient, args: &SearchArgs) -> Result<SearchArgs, AppError> {
+    let Some(profile_name) = args.profile.as_deref() else {
+        return Ok(args.clone());
+    };
+
+    let profile = client
+        .search_profile(profile_name)
+        .ok_or_else(|| AppError::InvalidSearch {
+            reason: format!("unknown search profile {profile_name:?}"),
+        })?;
+
+    let (assignee, unassigned) = if args.unassigned {
+        (None, true)
+    } else if let Some(assignee) = &args.assignee {
+        (Some(assignee.clone()), false)
+    } else {
+        (profile.assignee.clone(), profile.unassigned)
+    };
+
+    let (asc, desc) = if args.asc {
+        (true, false)
+    } else if args.desc {
+        (false, true)
+    } else {
+        (profile.asc, profile.desc)
+    };
+
+    Ok(SearchArgs {
+        json: args.json,
+        profile: args.profile.clone(),
+        query: args.query.clone(),
+        jql: args.jql.clone().or_else(|| profile.jql.clone()),
+        board: args.board.clone().or_else(|| profile.board.clone()),
+        project: args.project.clone().or_else(|| profile.project.clone()),
+        assignee,
+        unassigned,
+        reporter: args.reporter.clone().or_else(|| profile.reporter.clone()),
+        status: merged_vec(&profile.status, &args.status),
+        status_category: args
+            .status_category
+            .clone()
+            .or_else(|| profile.status_category.clone()),
+        issue_type: merged_vec(&profile.issue_type, &args.issue_type),
+        component: merged_vec(&profile.component, &args.component),
+        label: merged_vec(&profile.label, &args.label),
+        text: args.text.clone().or_else(|| profile.text.clone()),
+        open: args.open || profile.open,
+        limit: args.limit.or(profile.limit),
+        next_page_token: args.next_page_token.clone(),
+        columns: args.columns.clone(),
+        debug_jql: args.debug_jql,
+        sort: args.sort.clone().or_else(|| profile.sort.clone()),
+        asc,
+        desc,
+    })
+}
+
+fn merged_vec(profile_values: &[String], cli_values: &[String]) -> Vec<String> {
+    profile_values
+        .iter()
+        .chain(cli_values.iter())
+        .cloned()
+        .collect()
+}
+
 fn build_next_page_command(args: &SearchArgs, next_page_token: &str) -> String {
     let mut parts = vec!["jeera".to_string(), "search".to_string()];
 
     if args.json {
         parts.push("--json".to_string());
+    }
+    if let Some(profile) = &args.profile {
+        parts.push("--profile".to_string());
+        parts.push(shell_quote(profile));
     }
     if let Some(jql) = &args.jql {
         parts.push("--jql".to_string());
@@ -97,8 +169,13 @@ fn build_next_page_command(args: &SearchArgs, next_page_token: &str) -> String {
     if args.open {
         parts.push("--open".to_string());
     }
-    parts.push("--limit".to_string());
-    parts.push(args.limit.to_string());
+    if let Some(limit) = args.limit {
+        parts.push("--limit".to_string());
+        parts.push(limit.to_string());
+    } else if args.profile.is_none() {
+        parts.push("--limit".to_string());
+        parts.push(DEFAULT_SEARCH_LIMIT.to_string());
+    }
     if let Some(columns) = &args.columns {
         parts.push("--columns".to_string());
         parts.push(shell_quote(columns));
@@ -139,6 +216,8 @@ mod tests {
     use super::*;
     use crate::cli::SearchArgs;
     use crate::client::{JiraAuth, JiraClient, JiraClientConfig};
+    use crate::config::SearchProfileSettings;
+    use std::collections::BTreeMap;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -181,7 +260,114 @@ mod tests {
             },
             timeout: Duration::from_secs(5),
             default_board_id: None,
+            searches: BTreeMap::new(),
         })
+    }
+
+    #[test]
+    fn merge_search_profile_loads_defaults_and_appends_cli_filters() {
+        let mut searches = BTreeMap::new();
+        searches.insert(
+            "qqms".to_string(),
+            SearchProfileSettings {
+                project: Some("GCCDEV".to_string()),
+                component: vec!["QQMS".to_string()],
+                status: vec!["To Do".to_string()],
+                limit: Some(25),
+                sort: Some("rank".to_string()),
+                asc: true,
+                ..Default::default()
+            },
+        );
+        let client = JiraClient::new(JiraClientConfig {
+            base_url: Url::parse("https://example.atlassian.net/").unwrap(),
+            auth: JiraAuth::Bearer {
+                token: "token".to_string(),
+            },
+            timeout: Duration::from_secs(5),
+            default_board_id: None,
+            searches,
+        });
+        let args = SearchArgs {
+            profile: Some("qqms".to_string()),
+            status: vec!["In Progress".to_string()],
+            ..Default::default()
+        };
+
+        let merged = merge_search_profile(&client, &args).unwrap();
+
+        assert_eq!(merged.project.as_deref(), Some("GCCDEV"));
+        assert_eq!(merged.component, vec!["QQMS"]);
+        assert_eq!(merged.status, vec!["To Do", "In Progress"]);
+        assert_eq!(merged.limit, Some(25));
+        assert_eq!(merged.sort.as_deref(), Some("rank"));
+        assert!(merged.asc);
+        assert!(!merged.desc);
+    }
+
+    #[test]
+    fn merge_search_profile_allows_cli_to_override_scalar_and_conflicting_values() {
+        let mut searches = BTreeMap::new();
+        searches.insert(
+            "qqms".to_string(),
+            SearchProfileSettings {
+                board: Some("215".to_string()),
+                assignee: Some("me".to_string()),
+                limit: Some(25),
+                asc: true,
+                ..Default::default()
+            },
+        );
+        let client = JiraClient::new(JiraClientConfig {
+            base_url: Url::parse("https://example.atlassian.net/").unwrap(),
+            auth: JiraAuth::Bearer {
+                token: "token".to_string(),
+            },
+            timeout: Duration::from_secs(5),
+            default_board_id: None,
+            searches,
+        });
+        let args = SearchArgs {
+            profile: Some("qqms".to_string()),
+            board: Some("GCCDEV Kanban Board".to_string()),
+            unassigned: true,
+            limit: Some(10),
+            desc: true,
+            ..Default::default()
+        };
+
+        let merged = merge_search_profile(&client, &args).unwrap();
+
+        assert_eq!(merged.board.as_deref(), Some("GCCDEV Kanban Board"));
+        assert_eq!(merged.assignee, None);
+        assert!(merged.unassigned);
+        assert_eq!(merged.limit, Some(10));
+        assert!(!merged.asc);
+        assert!(merged.desc);
+    }
+
+    #[test]
+    fn merge_search_profile_rejects_unknown_profiles() {
+        let client = JiraClient::new(JiraClientConfig {
+            base_url: Url::parse("https://example.atlassian.net/").unwrap(),
+            auth: JiraAuth::Bearer {
+                token: "token".to_string(),
+            },
+            timeout: Duration::from_secs(5),
+            default_board_id: None,
+            searches: BTreeMap::new(),
+        });
+        let args = SearchArgs {
+            profile: Some("missing".to_string()),
+            ..Default::default()
+        };
+
+        let error = merge_search_profile(&client, &args).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: unknown search profile \"missing\""
+        );
     }
 
     #[test]
@@ -218,7 +404,7 @@ mod tests {
             columns: Some("key,status,summary".to_string()),
             sort: Some("rank".to_string()),
             desc: true,
-            limit: 1,
+            limit: Some(1),
             ..Default::default()
         };
 
@@ -229,10 +415,24 @@ mod tests {
     }
 
     #[test]
+    fn build_next_page_command_preserves_profile_without_expanding_it() {
+        let args = SearchArgs {
+            profile: Some("qqms".to_string()),
+            status: vec!["In Progress".to_string()],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_next_page_command(&args, "next-token"),
+            "jeera search --profile qqms --status 'In Progress' --next-page-token next-token"
+        );
+    }
+
+    #[test]
     fn build_next_page_command_quotes_named_board_references() {
         let args = SearchArgs {
             board: Some("GCCDEV Kanban Board".to_string()),
-            limit: 2,
+            limit: Some(2),
             ..Default::default()
         };
 
@@ -250,7 +450,7 @@ mod tests {
         let args = SearchArgs {
             project: Some("GCCDEV".to_string()),
             component: vec!["QQMS".to_string()],
-            limit: 1,
+            limit: Some(1),
             ..Default::default()
         };
         let mut stdout = Vec::new();

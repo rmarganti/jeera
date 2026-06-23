@@ -3,8 +3,10 @@ use crate::client::types::{
     JiraError, JiraErrorResponse, ListBoardIssuesRequest, ListBoardIssuesResponse,
     ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest, SearchIssuesResponse,
 };
+use crate::config::SearchProfileSettings;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
+use std::collections::BTreeMap;
 use std::time::Duration;
 use url::Url;
 
@@ -20,6 +22,7 @@ pub struct JiraClientConfig {
     pub auth: JiraAuth,
     pub timeout: Duration,
     pub default_board_id: Option<u64>,
+    pub searches: BTreeMap<String, SearchProfileSettings>,
 }
 
 pub enum JiraAuth {
@@ -66,6 +69,10 @@ impl JiraClient {
 
     pub fn default_board_id(&self) -> Option<u64> {
         self.config.default_board_id
+    }
+
+    pub fn search_profile(&self, name: &str) -> Option<&SearchProfileSettings> {
+        self.config.searches.get(name)
     }
 
     pub fn list_boards(
@@ -292,6 +299,7 @@ mod tests {
             auth,
             timeout,
             default_board_id: None,
+            searches: BTreeMap::new(),
         })
     }
 

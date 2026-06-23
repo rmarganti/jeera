@@ -170,7 +170,6 @@ fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
         || args.open
 }
 
-/// 
 fn board_filter(client: &JiraClient, board_id: u64) -> Result<BoardJqlFilter, AppError> {
     let configuration = client
         .get_board_configuration(&GetBoardConfigurationRequest { board_id })

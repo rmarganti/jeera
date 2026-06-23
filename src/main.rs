@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod issue_search;
+mod issue_show;
 mod jql;
 mod render;
 

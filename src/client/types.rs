@@ -154,16 +154,40 @@ pub struct SearchIssuesRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", bound(deserialize = "F: Deserialize<'de>"))]
 pub struct SearchIssuesResponse<F = Value> {
-    #[allow(dead_code)]
     pub is_last: bool,
     #[serde(default)]
     pub issues: Vec<IssueResponse<F>>,
     #[allow(dead_code)]
     #[serde(default)]
     pub names: BTreeMap<String, String>,
-    #[allow(dead_code)]
     pub next_page_token: Option<String>,
     #[allow(dead_code)]
     #[serde(default)]
     pub schema: BTreeMap<String, Value>,
+}
+
+// ----------------------------------------------------------------
+// Board Configuration
+// ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct GetBoardConfigurationRequest {
+    pub board_id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBoardConfigurationResponse {
+    pub filter: BoardFilterResponse,
+    pub sub_query: BoardSubQueryResponse,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BoardFilterResponse {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BoardSubQueryResponse {
+    pub query: String,
 }

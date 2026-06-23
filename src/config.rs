@@ -17,6 +17,7 @@ pub struct Settings {
     pub base_url: Url,
     pub auth: AuthSettings,
     pub http_timeout: Duration,
+    pub default_board_id: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +77,7 @@ impl fmt::Debug for Settings {
         f.debug_struct("Settings")
             .field("base_url", &self.base_url)
             .field("http_timeout_seconds", &self.http_timeout.as_secs())
+            .field("default_board_id", &self.default_board_id)
             .field("auth", &self.auth)
             .finish()
     }
@@ -137,6 +139,7 @@ impl Settings {
             base_url: self.base_url,
             auth,
             timeout: self.http_timeout,
+            default_board_id: self.default_board_id,
         }
     }
 }
@@ -150,6 +153,8 @@ struct RawSettings {
     base_url: String,
     #[serde(default = "default_http_timeout_seconds")]
     http_timeout_seconds: u64,
+    #[serde(default)]
+    default_board_id: Option<u64>,
     auth: AuthSettings,
 }
 
@@ -163,6 +168,7 @@ impl RawSettings {
             base_url,
             auth: self.auth,
             http_timeout,
+            default_board_id: self.default_board_id,
         })
     }
 }
@@ -296,6 +302,7 @@ mod tests {
         RawSettings {
             base_url: base_url.to_string(),
             http_timeout_seconds,
+            default_board_id: None,
             auth,
         }
     }
@@ -475,6 +482,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.http_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn accepts_default_board_id() {
+        let mut settings = raw_settings(
+            "https://example.atlassian.net",
+            default_http_timeout_seconds(),
+            AuthSettings::Bearer {
+                token: "secret".to_string(),
+            },
+        );
+        settings.default_board_id = Some(215);
+
+        let settings = settings.validate().unwrap();
+
+        assert_eq!(settings.default_board_id, Some(215));
     }
 
     #[test]

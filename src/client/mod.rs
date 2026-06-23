@@ -1,6 +1,6 @@
 use crate::client::types::{
-    GetIssueRequest, GetIssueResponse, JiraError, JiraErrorResponse, SearchIssuesRequest,
-    SearchIssuesResponse,
+    GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetIssueRequest, GetIssueResponse,
+    JiraError, JiraErrorResponse, SearchIssuesRequest, SearchIssuesResponse,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
@@ -18,6 +18,7 @@ pub struct JiraClientConfig {
     pub base_url: Url,
     pub auth: JiraAuth,
     pub timeout: Duration,
+    pub default_board_id: Option<u64>,
 }
 
 pub enum JiraAuth {
@@ -62,6 +63,10 @@ impl JiraClient {
         self.send_json::<(), GetIssueResponse<F>>(ureq::http::Method::GET, &path, None)
     }
 
+    pub fn default_board_id(&self) -> Option<u64> {
+        self.config.default_board_id
+    }
+
     pub fn issue_browse_url(&self, issue_key: &str) -> Result<String, JiraError> {
         self.config
             .base_url
@@ -82,6 +87,15 @@ impl JiraClient {
             "rest/api/3/search/jql",
             Some(request),
         )
+    }
+
+    pub fn get_board_configuration(
+        &self,
+        request: &GetBoardConfigurationRequest,
+    ) -> Result<GetBoardConfigurationResponse, JiraError> {
+        let path = format!("rest/agile/1.0/board/{}/configuration", request.board_id);
+
+        self.send_json::<(), GetBoardConfigurationResponse>(ureq::http::Method::GET, &path, None)
     }
 
     fn send_json<Request, Response>(
@@ -223,6 +237,7 @@ mod tests {
             base_url: Url::parse(base_url).unwrap(),
             auth,
             timeout,
+            default_board_id: None,
         })
     }
 
@@ -393,6 +408,33 @@ mod tests {
         assert_eq!(body["jql"], "project = DEMO ORDER BY updated DESC");
         assert_eq!(body["maxResults"], 2);
         assert_eq!(body["fields"], serde_json::json!(["summary", "status"]));
+    }
+
+    #[test]
+    fn get_board_configuration_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"filter":{"id":"10492"},"subQuery":{"query":"fixVersion is EMPTY"}}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetBoardConfigurationRequest { board_id: 215 };
+
+        let response = client.get_board_configuration(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let headers = captured.headers.to_ascii_lowercase();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(captured.path, "/rest/agile/1.0/board/215/configuration");
+        assert!(headers.contains("accept: application/json"));
+        assert!(headers.contains("authorization: bearer secret-token"));
+        assert!(captured.body.is_empty());
+        assert_eq!(response.filter.id, "10492");
+        assert_eq!(response.sub_query.query, "fixVersion is EMPTY");
     }
 
     #[test]

@@ -146,7 +146,7 @@ where
     let configured_board_id = args.board.or(default_board_id);
     if configured_board_id.is_none() && !has_explicit_search_restriction(args) {
         return Err(AppError::InvalidSearch {
-            reason: "provide at least one search restriction, such as --jql, --board, --project, --assignee, --component, --status, --label, --text, or configure default_board_id".to_string(),
+            reason: "provide at least one search restriction, such as QUERY, --jql, --board, --project, --assignee, --component, --status, --label, --text, or configure default_board_id".to_string(),
         });
     }
 
@@ -165,9 +165,13 @@ where
 }
 
 fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
-    args.jql
+    args.query
         .as_deref()
-        .is_some_and(|jql| !jql.trim().is_empty())
+        .is_some_and(|query| !query.trim().is_empty())
+        || args
+            .jql
+            .as_deref()
+            .is_some_and(|jql| !jql.trim().is_empty())
         || args.project.is_some()
         || args.assignee.is_some()
         || args.unassigned
@@ -183,6 +187,7 @@ fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
 
 fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
     validate_limit(args.limit)?;
+    validate_optional_value("query", args.query.as_deref())?;
     validate_optional_value("jql", args.jql.as_deref())?;
     validate_optional_value("project", args.project.as_deref())?;
     validate_optional_value("assignee", args.assignee.as_deref())?;
@@ -336,6 +341,10 @@ fn query_from_search_args(args: &SearchArgs, board_filter: Option<BoardJqlFilter
         query.push(Clause::field_in("labels", args.label.clone()));
     }
 
+    if let Some(query_text) = &args.query {
+        query.push(Clause::field_matches("text", query_text));
+    }
+
     if let Some(text) = &args.text {
         query.push(Clause::field_matches("text", text));
     }
@@ -484,6 +493,10 @@ mod tests {
                 ..Default::default()
             },
             SearchArgs {
+                query: Some(" ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
                 text: Some("".to_string()),
                 ..Default::default()
             },
@@ -557,6 +570,71 @@ mod tests {
                 ..
             } if filter_id == "not-a-filter-id"
         ));
+    }
+
+    #[test]
+    fn positional_query_is_an_explicit_search_restriction() {
+        let prepared = prepare_without_board(&SearchArgs {
+            query: Some("reporting".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "text ~ \"reporting\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn positional_query_combines_with_default_board_filter() {
+        let prepared = prepare_with_board_source(
+            &SearchArgs {
+                query: Some("reporting".to_string()),
+                ..Default::default()
+            },
+            Some(215),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.request().jql,
+            "filter = 10492 AND (fixVersion is EMPTY) AND text ~ \"reporting\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn positional_query_combines_with_raw_jql() {
+        let prepared = prepare_without_board(&SearchArgs {
+            query: Some("reporting".to_string()),
+            jql: Some("project = GCCDEV ORDER BY Rank ASC".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "(project = GCCDEV) AND text ~ \"reporting\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn positional_query_and_text_flag_are_combined_with_and() {
+        let prepared = prepare_without_board(&SearchArgs {
+            query: Some("reporting".to_string()),
+            text: Some("billing".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "text ~ \"reporting\" AND text ~ \"billing\" ORDER BY updated DESC"
+        );
     }
 
     #[test]

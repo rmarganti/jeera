@@ -29,6 +29,12 @@ pub struct SearchArgs {
     pub json: bool,
 
     #[arg(
+        value_name = "QUERY",
+        help = "Search Jira text with a concise positional query"
+    )]
+    pub query: Option<String>,
+
+    #[arg(
         long,
         help = "Combine raw JQL with any structured filters instead of replacing them"
     )]
@@ -101,6 +107,7 @@ impl Default for SearchArgs {
     fn default() -> Self {
         Self {
             json: false,
+            query: None,
             jql: None,
             board: None,
             project: None,
@@ -133,4 +140,36 @@ pub struct ShowArgs {
 
     #[arg(long)]
     pub comments: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn search_accepts_a_positional_query() {
+        let cli = Cli::parse_from(["jeera", "search", "reporting"]);
+
+        match cli.command {
+            Command::Search(args) => {
+                assert_eq!(args.query.as_deref(), Some("reporting"));
+                assert_eq!(args.text, None);
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_accepts_a_positional_query_with_flags() {
+        let cli = Cli::parse_from(["jeera", "search", "--board", "215", "reporting"]);
+
+        match cli.command {
+            Command::Search(args) => {
+                assert_eq!(args.board, Some(215));
+                assert_eq!(args.query.as_deref(), Some("reporting"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
 }

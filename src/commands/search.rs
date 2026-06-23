@@ -270,7 +270,7 @@ mod tests {
         searches.insert(
             "qqms".to_string(),
             SearchProfileSettings {
-                project: Some("GCCDEV".to_string()),
+                project: Some("SAMPLE".to_string()),
                 component: vec!["QQMS".to_string()],
                 status: vec!["To Do".to_string()],
                 limit: Some(25),
@@ -296,7 +296,7 @@ mod tests {
 
         let merged = merge_search_profile(&client, &args).unwrap();
 
-        assert_eq!(merged.project.as_deref(), Some("GCCDEV"));
+        assert_eq!(merged.project.as_deref(), Some("SAMPLE"));
         assert_eq!(merged.component, vec!["QQMS"]);
         assert_eq!(merged.status, vec!["To Do", "In Progress"]);
         assert_eq!(merged.limit, Some(25));
@@ -329,7 +329,7 @@ mod tests {
         });
         let args = SearchArgs {
             profile: Some("qqms".to_string()),
-            board: Some("GCCDEV Kanban Board".to_string()),
+            board: Some("SAMPLE Kanban Board".to_string()),
             unassigned: true,
             limit: Some(10),
             desc: true,
@@ -338,7 +338,7 @@ mod tests {
 
         let merged = merge_search_profile(&client, &args).unwrap();
 
-        assert_eq!(merged.board.as_deref(), Some("GCCDEV Kanban Board"));
+        assert_eq!(merged.board.as_deref(), Some("SAMPLE Kanban Board"));
         assert_eq!(merged.assignee, None);
         assert!(merged.unassigned);
         assert_eq!(merged.limit, Some(10));
@@ -398,7 +398,7 @@ mod tests {
         let args = SearchArgs {
             query: Some("release blockers".to_string()),
             board: Some("215".to_string()),
-            project: Some("GCCDEV".to_string()),
+            project: Some("SAMPLE".to_string()),
             status: vec!["In Progress".to_string()],
             component: vec!["Core Platform".to_string()],
             columns: Some("key,status,summary".to_string()),
@@ -410,7 +410,7 @@ mod tests {
 
         assert_eq!(
             build_next_page_command(&args, "token with spaces"),
-            "jeera search --board 215 --project GCCDEV --status 'In Progress' --component 'Core Platform' --limit 1 --columns 'key,status,summary' --sort rank --desc --next-page-token 'token with spaces' 'release blockers'"
+            "jeera search --board 215 --project SAMPLE --status 'In Progress' --component 'Core Platform' --limit 1 --columns 'key,status,summary' --sort rank --desc --next-page-token 'token with spaces' 'release blockers'"
         );
     }
 
@@ -431,14 +431,14 @@ mod tests {
     #[test]
     fn build_next_page_command_quotes_named_board_references() {
         let args = SearchArgs {
-            board: Some("GCCDEV Kanban Board".to_string()),
+            board: Some("SAMPLE Kanban Board".to_string()),
             limit: Some(2),
             ..Default::default()
         };
 
         assert_eq!(
             build_next_page_command(&args, "next-token"),
-            "jeera search --board 'GCCDEV Kanban Board' --limit 2 --next-page-token next-token"
+            "jeera search --board 'SAMPLE Kanban Board' --limit 2 --next-page-token next-token"
         );
     }
 
@@ -448,7 +448,7 @@ mod tests {
         let (base_url, rx) = spawn_server("200 OK", body);
         let client = test_client(base_url);
         let args = SearchArgs {
-            project: Some("GCCDEV".to_string()),
+            project: Some("SAMPLE".to_string()),
             component: vec!["QQMS".to_string()],
             limit: Some(1),
             ..Default::default()
@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(String::from_utf8(stderr).unwrap(), "");
         assert_eq!(
             String::from_utf8(stdout).unwrap(),
-            "No issues found.\nNext page token: next token\nNext page command: jeera search --project GCCDEV --component QQMS --limit 1 --next-page-token 'next token'\n"
+            "No issues found.\nNext page token: next token\nNext page command: jeera search --project SAMPLE --component QQMS --limit 1 --next-page-token 'next token'\n"
         );
     }
 }

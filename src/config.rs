@@ -576,7 +576,7 @@ mod tests {
         settings.searches.insert(
             "qqms".to_string(),
             SearchProfileSettings {
-                project: Some("GCCDEV".to_string()),
+                project: Some("SAMPLE".to_string()),
                 component: vec!["QQMS".to_string()],
                 limit: Some(25),
                 ..Default::default()
@@ -587,7 +587,7 @@ mod tests {
 
         assert_eq!(settings.searches.len(), 1);
         let profile = settings.searches.get("qqms").unwrap();
-        assert_eq!(profile.project.as_deref(), Some("GCCDEV"));
+        assert_eq!(profile.project.as_deref(), Some("SAMPLE"));
         assert_eq!(profile.component, vec!["QQMS"]);
         assert_eq!(profile.limit, Some(25));
     }

@@ -187,14 +187,14 @@ mod tests {
     #[test]
     fn prepare_sets_project_filter_when_present() {
         let prepared = prepare(&BoardsArgs {
-            project: Some("GCCDEV".to_string()),
+            project: Some("SAMPLE".to_string()),
             json: false,
         })
         .unwrap();
 
         assert_eq!(
             prepared.request().project_key_or_id.as_deref(),
-            Some("GCCDEV")
+            Some("SAMPLE")
         );
     }
 
@@ -207,10 +207,10 @@ mod tests {
 
         assert_eq!(output.boards.len(), 4);
         assert_eq!(output.boards[0].id, 215);
-        assert_eq!(output.boards[0].project_key.as_deref(), Some("GCCDEV"));
+        assert_eq!(output.boards[0].project_key.as_deref(), Some("SAMPLE"));
         assert_eq!(
             output.boards[2].location_name.as_deref(),
-            Some("Operations Workspace")
+            Some("Shared Workspace")
         );
         assert_eq!(output.boards[3].project_key, None);
     }
@@ -227,10 +227,10 @@ mod tests {
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
             concat!(
-                "215  kanban  GCCDEV                GCCDEV Kanban Board\n",
-                "212  kanban  GCCDEV                Commercial Reports\n",
-                "314  scrum   Operations Workspace  Operations Triage\n",
-                "999  simple  -                     Personal Board\n",
+                "215  kanban  SAMPLE            SAMPLE Kanban Board\n",
+                "212  kanban  SAMPLE            Release Dashboard\n",
+                "314  scrum   Shared Workspace  Platform Sprint\n",
+                "999  simple  -                 Sandbox Board\n",
             )
         );
     }
@@ -256,7 +256,7 @@ mod tests {
 
         let rendered = String::from_utf8(rendered).unwrap();
         assert!(rendered.contains("\"boards\": ["));
-        assert!(rendered.contains("\"project_key\": \"GCCDEV\""));
-        assert!(rendered.contains("\"location_name\": \"Operations Workspace\""));
+        assert!(rendered.contains("\"project_key\": \"SAMPLE\""));
+        assert!(rendered.contains("\"location_name\": \"Shared Workspace\""));
     }
 }

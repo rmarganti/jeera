@@ -242,20 +242,20 @@ mod tests {
     #[test]
     fn raw_jql_can_be_combined_with_structured_clauses() {
         let mut query = Query::new();
-        query.push(Clause::raw("project = GCCDEV"));
+        query.push(Clause::raw("project = SAMPLE"));
         query.push(Clause::field_in("component", vec!["QQMS".to_string()]));
         query.order_by(Order::field("Rank", SortDirection::Asc));
 
         assert_eq!(
             query.to_jql(),
-            "(project = GCCDEV) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND component = \"QQMS\" ORDER BY Rank ASC"
         );
     }
 
     #[test]
     fn structured_clauses_are_combined_and_values_are_escaped() {
         let mut query = Query::new();
-        query.push(Clause::field_equals("project", Value::text("GCCDEV")));
+        query.push(Clause::field_equals("project", Value::text("SAMPLE")));
         query.push(Clause::field_equals(
             "assignee",
             UserRef::parse("me").to_value(),
@@ -271,7 +271,7 @@ mod tests {
 
         assert_eq!(
             query.to_jql(),
-            "project = \"GCCDEV\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
+            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
         );
     }
 

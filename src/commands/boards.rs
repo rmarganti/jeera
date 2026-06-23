@@ -86,7 +86,7 @@ mod tests {
         let (base_url, rx) = spawn_server("200 OK", &fixture("boards-basic.json"));
         let client = test_client(base_url);
         let args = BoardsArgs {
-            project: Some("GCCDEV".to_string()),
+            project: Some("SAMPLE".to_string()),
             json: false,
         };
 
@@ -95,6 +95,6 @@ mod tests {
         run_with_writer(&client, &args, &mut stdout).unwrap();
 
         let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(request.starts_with("GET /rest/agile/1.0/board?projectKeyOrId=GCCDEV HTTP/1.1"));
+        assert!(request.starts_with("GET /rest/agile/1.0/board?projectKeyOrId=SAMPLE HTTP/1.1"));
     }
 }

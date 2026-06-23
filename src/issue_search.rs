@@ -998,13 +998,13 @@ mod tests {
     fn named_board_reference_resolves_before_loading_board_filter() {
         let prepared = prepare_with_board_source(
             &SearchArgs {
-                board: Some("GCCDEV Kanban Board".to_string()),
+                board: Some("SAMPLE Kanban Board".to_string()),
                 component: vec!["QQMS".to_string()],
                 ..Default::default()
             },
             None,
             |board_name| {
-                assert_eq!(board_name, "GCCDEV Kanban Board");
+                assert_eq!(board_name, "SAMPLE Kanban Board");
                 Ok(215)
             },
             |board_id| {
@@ -1027,13 +1027,13 @@ mod tests {
     fn board_name_matching_is_case_insensitive_when_needed() {
         let boards = vec![BoardResponse {
             id: 215,
-            name: "GCCDEV Kanban Board".to_string(),
+            name: "SAMPLE Kanban Board".to_string(),
             board_type: "kanban".to_string(),
             location: None,
         }];
 
         assert_eq!(
-            find_board_id_by_name(&boards, "gccdev kanban board").unwrap(),
+            find_board_id_by_name(&boards, "sample kanban board").unwrap(),
             215
         );
     }
@@ -1042,7 +1042,7 @@ mod tests {
     fn unknown_board_name_is_reported_clearly() {
         let boards = vec![BoardResponse {
             id: 215,
-            name: "GCCDEV Kanban Board".to_string(),
+            name: "SAMPLE Kanban Board".to_string(),
             board_type: "kanban".to_string(),
             location: None,
         }];
@@ -1136,13 +1136,13 @@ mod tests {
     fn positional_query_combines_with_raw_jql() {
         let prepared = prepare_without_board(&SearchArgs {
             query: Some("reporting".to_string()),
-            jql: Some("project = GCCDEV ORDER BY Rank ASC".to_string()),
+            jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
             ..Default::default()
         });
 
         assert_eq!(
             prepared.request().jql,
-            "(project = GCCDEV) AND text ~ \"reporting\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND text ~ \"reporting\" ORDER BY Rank ASC"
         );
     }
 
@@ -1358,7 +1358,7 @@ mod tests {
     #[test]
     fn raw_jql_can_be_combined_with_explicit_filters() {
         let args = SearchArgs {
-            jql: Some("project = GCCDEV ORDER BY Rank ASC".to_string()),
+            jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
             component: vec!["QQMS".to_string()],
             ..Default::default()
         };
@@ -1366,7 +1366,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "(project = GCCDEV) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND component = \"QQMS\" ORDER BY Rank ASC"
         );
     }
 
@@ -1399,7 +1399,7 @@ mod tests {
     #[test]
     fn final_jql_keeps_board_derived_clauses_when_combining_with_raw_jql() {
         let args = SearchArgs {
-            jql: Some("project = GCCDEV ORDER BY Rank ASC".to_string()),
+            jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
             component: vec!["QQMS".to_string()],
             ..Default::default()
         };
@@ -1419,14 +1419,14 @@ mod tests {
 
         assert_eq!(
             prepared.jql(),
-            "(project = GCCDEV) AND filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
         );
     }
 
     #[test]
     fn structured_filters_are_combined_and_values_are_escaped() {
         let args = SearchArgs {
-            project: Some("GCCDEV".to_string()),
+            project: Some("SAMPLE".to_string()),
             assignee: Some("me".to_string()),
             status: vec!["In Progress".to_string(), "Ready \"Soon\"".to_string()],
             component: vec!["QQMS".to_string()],
@@ -1438,7 +1438,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "project = \"GCCDEV\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
+            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
         );
     }
 

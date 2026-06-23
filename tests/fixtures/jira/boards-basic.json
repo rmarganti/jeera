@@ -5,37 +5,37 @@
   "values": [
     {
       "id": 215,
-      "name": "GCCDEV Kanban Board",
+      "name": "SAMPLE Kanban Board",
       "type": "kanban",
       "location": {
         "projectId": 10001,
-        "projectKey": "GCCDEV",
-        "projectName": "GCCDEV",
-        "displayName": "GCCDEV"
+        "projectKey": "SAMPLE",
+        "projectName": "Sample Project",
+        "displayName": "Sample Project"
       }
     },
     {
       "id": 212,
-      "name": "Commercial Reports",
+      "name": "Release Dashboard",
       "type": "kanban",
       "location": {
         "projectId": 10001,
-        "projectKey": "GCCDEV",
-        "projectName": "GCCDEV",
-        "displayName": "GCCDEV"
+        "projectKey": "SAMPLE",
+        "projectName": "Sample Project",
+        "displayName": "Sample Project"
       }
     },
     {
       "id": 314,
-      "name": "Operations Triage",
+      "name": "Platform Sprint",
       "type": "scrum",
       "location": {
-        "displayName": "Operations Workspace"
+        "displayName": "Shared Workspace"
       }
     },
     {
       "id": 999,
-      "name": "Personal Board",
+      "name": "Sandbox Board",
       "type": "simple"
     }
   ]

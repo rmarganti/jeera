@@ -163,13 +163,13 @@ mod tests {
             "jeera",
             "search",
             "--board",
-            "GCCDEV Kanban Board",
+            "SAMPLE Kanban Board",
             "reporting",
         ]);
 
         match cli.command {
             Command::Search(args) => {
-                assert_eq!(args.board.as_deref(), Some("GCCDEV Kanban Board"));
+                assert_eq!(args.board.as_deref(), Some("SAMPLE Kanban Board"));
                 assert_eq!(args.query.as_deref(), Some("reporting"));
             }
             other => panic!("expected search command, got {other:?}"),
@@ -182,14 +182,14 @@ mod tests {
             "jeera",
             "search",
             "--project",
-            "GCCDEV",
+            "SAMPLE",
             "--columns",
             "key,type,status,assignee,updated,summary",
         ]);
 
         match cli.command {
             Command::Search(args) => {
-                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.project.as_deref(), Some("SAMPLE"));
                 assert_eq!(
                     args.columns.as_deref(),
                     Some("key,type,status,assignee,updated,summary")

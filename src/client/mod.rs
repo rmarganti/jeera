@@ -482,7 +482,7 @@ mod tests {
             },
         );
         let request = ListBoardsRequest {
-            project_key_or_id: Some("GCCDEV".to_string()),
+            project_key_or_id: Some("SAMPLE".to_string()),
         };
 
         let response = client.list_boards(&request).unwrap();
@@ -490,7 +490,7 @@ mod tests {
         let headers = captured.headers.to_ascii_lowercase();
 
         assert_eq!(captured.method, "GET");
-        assert_eq!(captured.path, "/rest/agile/1.0/board?projectKeyOrId=GCCDEV");
+        assert_eq!(captured.path, "/rest/agile/1.0/board?projectKeyOrId=SAMPLE");
         assert!(headers.contains("accept: application/json"));
         assert!(headers.contains("authorization: bearer secret-token"));
         assert!(captured.body.is_empty());
@@ -502,7 +502,7 @@ mod tests {
                 .location
                 .as_ref()
                 .and_then(|l| l.project_key.as_deref()),
-            Some("GCCDEV")
+            Some("SAMPLE")
         );
     }
 

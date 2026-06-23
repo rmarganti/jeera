@@ -95,15 +95,18 @@ pub struct SearchArgs {
     )]
     pub debug_jql: bool,
 
-    #[arg(long, default_value = "updated")]
-    pub sort: String,
+    #[arg(
+        long,
+        help = "Sort by Jira field or alias (rank, updated, created, priority)"
+    )]
+    pub sort: Option<String>,
 
     #[arg(long, conflicts_with = "desc")]
     pub asc: bool,
 
     #[arg(
         long,
-        help = "Explicitly request descending sort order (the default if --asc is not set)"
+        help = "Explicitly request descending sort order; without --asc/--desc, board searches default to Rank ASC and other searches default to updated DESC"
     )]
     pub desc: bool,
 }
@@ -132,7 +135,7 @@ impl Default for SearchArgs {
             next_page_token: None,
             columns: None,
             debug_jql: false,
-            sort: "updated".to_string(),
+            sort: None,
             asc: false,
             desc: false,
         }
@@ -199,6 +202,20 @@ mod tests {
                     args.columns.as_deref(),
                     Some("key,type,status,assignee,updated,summary")
                 );
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_accepts_optional_sort_and_direction_flags() {
+        let cli = Cli::parse_from(["jeera", "search", "--sort", "rank", "--desc", "demo"]);
+
+        match cli.command {
+            Command::Search(args) => {
+                assert_eq!(args.sort.as_deref(), Some("rank"));
+                assert!(args.desc);
+                assert_eq!(args.query.as_deref(), Some("demo"));
             }
             other => panic!("expected search command, got {other:?}"),
         }

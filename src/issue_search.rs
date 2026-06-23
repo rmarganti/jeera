@@ -11,6 +11,7 @@ use crate::client::{
 use crate::error::AppError;
 use crate::jql::{self, Clause, Order, Query, SortDirection, UserRef, Value};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::io::Write;
 
 const SEARCH_MIN_LIMIT: u32 = 1;
@@ -422,7 +423,9 @@ fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
     validate_repeated_values("type", &args.issue_type)?;
     validate_repeated_values("component", &args.component)?;
     validate_repeated_values("label", &args.label)?;
-    validate_sort_field(&args.sort)?;
+    if let Some(sort) = args.sort.as_deref() {
+        validate_sort_field(sort)?;
+    }
     Ok(())
 }
 
@@ -496,6 +499,7 @@ fn parse_board_filter_id(board_id: u64, filter_id: &str) -> Result<u64, AppError
 
 // Translates CLI-shaped search intent into generic JQL clauses.
 fn query_from_search_args(args: &SearchArgs, board_filter: Option<BoardJqlFilter>) -> Query {
+    let board_scoped = board_filter.is_some();
     let (raw_clause, raw_order_by) = args
         .jql
         .as_deref()
@@ -579,22 +583,50 @@ fn query_from_search_args(args: &SearchArgs, board_filter: Option<BoardJqlFilter
     let order_by = raw_order_by
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map_or_else(
-            || {
-                Order::field(
-                    args.sort.clone(),
-                    if args.asc {
-                        SortDirection::Asc
-                    } else {
-                        SortDirection::Desc
-                    },
-                )
-            },
-            Order::raw,
-        );
+        .map_or_else(|| default_order(args, board_scoped), Order::raw);
 
     query.order_by(order_by);
     query
+}
+
+fn default_order(args: &SearchArgs, board_scoped: bool) -> Order {
+    let field = args
+        .sort
+        .as_deref()
+        .map(canonical_sort_field)
+        .unwrap_or_else(|| {
+            if board_scoped {
+                Cow::Borrowed("Rank")
+            } else {
+                Cow::Borrowed("updated")
+            }
+        });
+
+    let direction = if args.asc {
+        SortDirection::Asc
+    } else if args.desc {
+        SortDirection::Desc
+    } else if field.eq_ignore_ascii_case("Rank") {
+        SortDirection::Asc
+    } else {
+        SortDirection::Desc
+    };
+
+    Order::field(field.into_owned(), direction)
+}
+
+fn canonical_sort_field(field: &str) -> Cow<'_, str> {
+    if field.eq_ignore_ascii_case("rank") {
+        Cow::Borrowed("Rank")
+    } else if field.eq_ignore_ascii_case("updated") {
+        Cow::Borrowed("updated")
+    } else if field.eq_ignore_ascii_case("created") {
+        Cow::Borrowed("created")
+    } else if field.eq_ignore_ascii_case("priority") {
+        Cow::Borrowed("priority")
+    } else {
+        Cow::Borrowed(field)
+    }
 }
 
 fn search_fields(json: bool, human_columns: &HumanColumns) -> Vec<String> {
@@ -819,7 +851,7 @@ mod tests {
             let error = prepare_with_board_source(
                 &SearchArgs {
                     assignee: Some("me".to_string()),
-                    sort: sort.to_string(),
+                    sort: Some(sort.to_string()),
                     ..Default::default()
                 },
                 None,
@@ -878,7 +910,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "filter = 10492 AND (fixVersion is EMPTY) AND text ~ \"reporting\" ORDER BY updated DESC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND text ~ \"reporting\" ORDER BY Rank ASC"
         );
     }
 
@@ -907,6 +939,79 @@ mod tests {
         assert_eq!(
             prepared.request().jql,
             "text ~ \"reporting\" AND text ~ \"billing\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn search_without_board_defaults_to_updated_desc() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.jql(),
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn board_search_defaults_to_rank_asc() {
+        let prepared = prepare_with_board_source(
+            &SearchArgs {
+                component: vec!["QQMS".to_string()],
+                ..Default::default()
+            },
+            Some(215),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn rank_sort_alias_maps_to_rank_asc_without_explicit_direction() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            sort: Some("rank".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(prepared.jql(), "assignee = currentUser() ORDER BY Rank ASC");
+    }
+
+    #[test]
+    fn explicit_sort_still_defaults_to_desc_for_non_rank_fields() {
+        let prepared = prepare_with_board_source(
+            &SearchArgs {
+                component: vec!["QQMS".to_string()],
+                sort: Some("updated".to_string()),
+                ..Default::default()
+            },
+            Some(215),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY updated DESC"
         );
     }
 
@@ -991,7 +1096,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_desc_is_a_documented_no_op_because_descending_is_the_default() {
+    fn explicit_desc_keeps_updated_desc_for_non_board_searches() {
         let prepared = prepare_without_board(&SearchArgs {
             assignee: Some("me".to_string()),
             desc: true,
@@ -1001,6 +1106,31 @@ mod tests {
         assert_eq!(
             prepared.request().jql,
             "assignee = currentUser() ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn explicit_desc_flips_board_default_rank_sort_to_desc() {
+        let prepared = prepare_with_board_source(
+            &SearchArgs {
+                component: vec!["QQMS".to_string()],
+                desc: true,
+                ..Default::default()
+            },
+            Some(215),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(BoardJqlFilter {
+                    filter_id: 10492,
+                    sub_query: Some("fixVersion is EMPTY".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.request().jql,
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank DESC"
         );
     }
 
@@ -1036,7 +1166,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY updated DESC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
         );
     }
 

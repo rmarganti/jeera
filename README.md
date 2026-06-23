@@ -96,13 +96,15 @@ Options:
 - `--next-page-token <TOKEN>` resume a paginated search
 - `--columns <COLS>` customize human output columns with `key,status,summary,components,type,assignee,priority,updated`
 - `--debug-jql` print the final JQL to stderr before executing
-- `--sort <FIELD>` defaults to `updated`
+- `--sort <FIELD>` optional Jira sort field or alias (`rank`, `updated`, `created`, `priority`)
 - `--asc`
-- `--desc` explicit no-op for the default descending order
+- `--desc`
 
 Notes:
 
 - Human output is colorized; `--json` output is not.
+- Board-scoped searches default to `ORDER BY Rank ASC`; other searches default to `ORDER BY updated DESC`.
+- `--sort rank` maps to Jira `Rank` and defaults to ascending order unless you pass `--desc`.
 - When more results are available, human output includes both the next page token and a copy/pasteable next-page command.
 - `--columns` affects human output only; JSON remains a stable structured schema.
 
@@ -112,6 +114,7 @@ Examples:
 jeera search reporting
 jeera search --assignee me --open
 jeera search --board 215 --columns key,type,status,assignee,updated,summary --limit 5
+jeera search --board 215 --sort rank --desc --limit 5
 jeera search --project GCCDEV --component QQMS --debug-jql
 jeera search --jql 'project = GCCDEV' --status 'In Progress' --json
 ```

@@ -103,12 +103,15 @@ fn build_next_page_command(args: &SearchArgs, next_page_token: &str) -> String {
         parts.push("--columns".to_string());
         parts.push(shell_quote(columns));
     }
-    if args.sort != "updated" {
+    if let Some(sort) = &args.sort {
         parts.push("--sort".to_string());
-        parts.push(shell_quote(&args.sort));
+        parts.push(shell_quote(sort));
     }
     if args.asc {
         parts.push("--asc".to_string());
+    }
+    if args.desc {
+        parts.push("--desc".to_string());
     }
     parts.push("--next-page-token".to_string());
     parts.push(shell_quote(next_page_token));
@@ -213,13 +216,15 @@ mod tests {
             status: vec!["In Progress".to_string()],
             component: vec!["Core Platform".to_string()],
             columns: Some("key,status,summary".to_string()),
+            sort: Some("rank".to_string()),
+            desc: true,
             limit: 1,
             ..Default::default()
         };
 
         assert_eq!(
             build_next_page_command(&args, "token with spaces"),
-            "jeera search --board 215 --project GCCDEV --status 'In Progress' --component 'Core Platform' --limit 1 --columns 'key,status,summary' --next-page-token 'token with spaces' 'release blockers'"
+            "jeera search --board 215 --project GCCDEV --status 'In Progress' --component 'Core Platform' --limit 1 --columns 'key,status,summary' --sort rank --desc --next-page-token 'token with spaces' 'release blockers'"
         );
     }
 

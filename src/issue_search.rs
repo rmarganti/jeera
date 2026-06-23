@@ -141,13 +141,13 @@ pub(crate) fn render_human(
         writeln!(writer, "No issues found.").map_err(|source| AppError::RenderOutput { source })?;
     } else if columns.is_empty() {
         for issue in &output.issues {
-            let components = issue.components.join(", ");
+            let components = render_components(issue);
 
             writeln!(
                 writer,
                 "{} [{}] {}{}",
-                issue.key,
-                issue.status_name,
+                render_key(&issue.key),
+                render_status(&issue.status_name),
                 issue.summary,
                 if components.is_empty() {
                     String::new()
@@ -233,14 +233,14 @@ impl SearchColumn {
 
     fn render(self, issue: &SearchIssueOutput) -> String {
         match self {
-            Self::Key => issue.key.clone(),
-            Self::Status => issue.status_name.clone(),
+            Self::Key => render_key(&issue.key),
+            Self::Status => render_status(&issue.status_name),
             Self::Summary => issue.summary.clone(),
             Self::Components => {
                 if issue.components.is_empty() {
                     "-".to_string()
                 } else {
-                    issue.components.join(", ")
+                    render_components(issue)
                 }
             }
             Self::Type => issue
@@ -257,6 +257,56 @@ impl SearchColumn {
                 .unwrap_or_else(|| "Unprioritized".to_string()),
             Self::Updated => issue.updated.clone().unwrap_or_else(|| "-".to_string()),
         }
+    }
+}
+
+fn render_key(key: &str) -> String {
+    use crate::render::ansi::{BOLD, CYAN, RESET};
+
+    format!("{BOLD}{CYAN}{key}{RESET}")
+}
+
+fn render_status(status_name: &str) -> String {
+    use crate::render::ansi::{DIM, GREEN, RESET, YELLOW};
+
+    let lowercase = status_name.to_ascii_lowercase();
+    let color = if lowercase.contains("done")
+        || lowercase.contains("closed")
+        || lowercase.contains("resolved")
+    {
+        Some(GREEN)
+    } else if lowercase.contains("progress")
+        || lowercase.contains("review")
+        || lowercase.contains("test")
+        || lowercase.contains("qa")
+        || lowercase.contains("blocked")
+    {
+        Some(YELLOW)
+    } else if lowercase.contains("to do")
+        || lowercase.contains("todo")
+        || lowercase.contains("backlog")
+        || lowercase.contains("selected")
+        || lowercase.contains("open")
+    {
+        Some(DIM)
+    } else {
+        None
+    };
+
+    match color {
+        Some(color) => format!("{color}{status_name}{RESET}"),
+        None => status_name.to_string(),
+    }
+}
+
+fn render_components(issue: &SearchIssueOutput) -> String {
+    use crate::render::ansi::{DIM, RESET};
+
+    let components = issue.components.join(", ");
+    if components.is_empty() {
+        String::new()
+    } else {
+        format!("{DIM}{components}{RESET}")
     }
 }
 
@@ -1066,7 +1116,7 @@ mod tests {
     }
 
     #[test]
-    fn render_human_includes_components_when_present() {
+    fn render_human_includes_colorized_key_status_and_components_when_present() {
         let response: SearchIssuesResponse<SearchIssueFields> =
             serde_json::from_str(&fixture("search-basic.json")).unwrap();
         let output = output_from_search_response(response);
@@ -1074,19 +1124,14 @@ mod tests {
 
         render_human(&mut rendered, &output, &[]).unwrap();
 
-        assert_eq!(
-            String::from_utf8(rendered).unwrap(),
-            concat!(
-                "DEMO-101 [In Review] Align application CSP with CDN configuration (Web Platform)\n",
-                "DEMO-102 [Closed] Support iframe parent messaging (Web Platform)\n",
-                "DEMO-103 [Closed] Adjust embedded content height (Web Platform)\n",
-                "Next page token: sanitized-next-page-token\n"
-            )
-        );
+        let rendered = String::from_utf8(rendered).unwrap();
+        assert!(rendered.contains("\u{1b}[1m\u{1b}[36mDEMO-101\u{1b}[0m [\u{1b}[33mIn Review\u{1b}[0m] Align application CSP with CDN configuration (\u{1b}[2mWeb Platform\u{1b}[0m)"));
+        assert!(rendered.contains("\u{1b}[1m\u{1b}[36mDEMO-102\u{1b}[0m [\u{1b}[32mClosed\u{1b}[0m] Support iframe parent messaging (\u{1b}[2mWeb Platform\u{1b}[0m)"));
+        assert!(rendered.ends_with("Next page token: sanitized-next-page-token\n"));
     }
 
     #[test]
-    fn render_human_uses_selected_columns_and_placeholders_for_missing_values() {
+    fn render_human_uses_selected_columns_and_colorizes_key_and_status() {
         let response: SearchIssuesResponse<SearchIssueFields> =
             serde_json::from_str(&fixture("search-columns.json")).unwrap();
         let output = output_from_search_response(response);
@@ -1110,8 +1155,8 @@ mod tests {
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
             concat!(
-                "DEMO-201 | Bug | In Progress | Mina Li | High | 2026-06-22T14:45:00.000+0000 | Investigate webhook retries\n",
-                "DEMO-202 | Task | To Do | Unassigned | Unprioritized | 2026-06-21T09:15:00.000+0000 | Document fallback behavior\n"
+                "\u{1b}[1m\u{1b}[36mDEMO-201\u{1b}[0m | Bug | \u{1b}[33mIn Progress\u{1b}[0m | Mina Li | High | 2026-06-22T14:45:00.000+0000 | Investigate webhook retries\n",
+                "\u{1b}[1m\u{1b}[36mDEMO-202\u{1b}[0m | Task | \u{1b}[2mTo Do\u{1b}[0m | Unassigned | Unprioritized | 2026-06-21T09:15:00.000+0000 | Document fallback behavior\n"
             )
         );
     }
@@ -1127,8 +1172,31 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
-            "DEMO-104 [Closed] Populate missing environment values\n"
+            "\u{1b}[1m\u{1b}[36mDEMO-104\u{1b}[0m [\u{1b}[32mClosed\u{1b}[0m] Populate missing environment values\n"
         );
+    }
+
+    #[test]
+    fn render_human_colorizes_components_in_custom_columns() {
+        let response: SearchIssuesResponse<SearchIssueFields> =
+            serde_json::from_str(&fixture("search-basic.json")).unwrap();
+        let output = output_from_search_response(response);
+        let mut rendered = Vec::new();
+
+        render_human(
+            &mut rendered,
+            &output,
+            &[
+                SearchColumn::Key,
+                SearchColumn::Components,
+                SearchColumn::Summary,
+            ],
+        )
+        .unwrap();
+
+        assert!(String::from_utf8(rendered)
+            .unwrap()
+            .contains("\u{1b}[1m\u{1b}[36mDEMO-101\u{1b}[0m | \u{1b}[2mWeb Platform\u{1b}[0m | Align application CSP with CDN configuration"));
     }
 
     #[test]

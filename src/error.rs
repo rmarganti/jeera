@@ -11,6 +11,9 @@ pub enum AppError {
     #[error("while executing search: {source}")]
     ExecuteSearch { source: JiraError },
 
+    #[error("while executing show: {source}")]
+    ExecuteShow { source: JiraError },
+
     #[error("while writing output: {source}")]
     RenderOutput { source: std::io::Error },
 

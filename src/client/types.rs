@@ -115,6 +115,19 @@ pub enum JiraError {
 }
 
 // ----------------------------------------------------------------
+// Get Issue
+// ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct GetIssueRequest {
+    pub issue_id_or_key: String,
+    pub fields: Vec<String>,
+    pub expand: Vec<String>,
+}
+
+pub type GetIssueResponse<F = Value> = IssueResponse<F>;
+
+// ----------------------------------------------------------------
 // Search Issues
 // ----------------------------------------------------------------
 

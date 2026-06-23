@@ -1,5 +1,6 @@
 use crate::client::types::{
-    JiraError, JiraErrorResponse, SearchIssuesRequest, SearchIssuesResponse,
+    GetIssueRequest, GetIssueResponse, JiraError, JiraErrorResponse, SearchIssuesRequest,
+    SearchIssuesResponse,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
@@ -36,6 +37,37 @@ impl JiraClient {
             config,
             http: http_config.into(),
         }
+    }
+
+    pub fn get_issue<F>(&self, request: &GetIssueRequest) -> Result<GetIssueResponse<F>, JiraError>
+    where
+        F: DeserializeOwned,
+    {
+        let mut path = format!("rest/api/3/issue/{}", request.issue_id_or_key);
+        let mut query = Vec::new();
+
+        if !request.fields.is_empty() {
+            query.push(format!("fields={}", request.fields.join(",")));
+        }
+
+        if !request.expand.is_empty() {
+            query.push(format!("expand={}", request.expand.join(",")));
+        }
+
+        if !query.is_empty() {
+            path.push('?');
+            path.push_str(&query.join("&"));
+        }
+
+        self.send_json::<(), GetIssueResponse<F>>(ureq::http::Method::GET, &path, None)
+    }
+
+    pub fn issue_browse_url(&self, issue_key: &str) -> Result<String, JiraError> {
+        self.config
+            .base_url
+            .join(&format!("browse/{issue_key}"))
+            .map(|url| url.to_string())
+            .map_err(|source| JiraError::BuildUrl { source })
     }
 
     pub fn search_issues<F>(
@@ -361,6 +393,51 @@ mod tests {
         assert_eq!(body["jql"], "project = DEMO ORDER BY updated DESC");
         assert_eq!(body["maxResults"], 2);
         assert_eq!(body["fields"], serde_json::json!(["summary", "status"]));
+    }
+
+    #[test]
+    fn get_issue_sends_expected_request() {
+        let (base_url, rx) = spawn_server("200 OK", fixture("show-basic.json"));
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetIssueRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+            fields: vec!["summary".to_string(), "status".to_string()],
+            expand: vec!["renderedFields".to_string()],
+        };
+
+        let _: GetIssueResponse<Value> = client.get_issue(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let headers = captured.headers.to_ascii_lowercase();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(
+            captured.path,
+            "/rest/api/3/issue/DEMO-101?fields=summary,status&expand=renderedFields"
+        );
+        assert!(headers.contains("accept: application/json"));
+        assert!(headers.contains("authorization: bearer secret-token"));
+        assert!(headers.contains("user-agent: jeera/"));
+        assert!(captured.body.is_empty());
+    }
+
+    #[test]
+    fn issue_browse_url_uses_configured_base_url() {
+        let client = client(
+            "https://example.atlassian.net/jira/",
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+
+        assert_eq!(
+            client.issue_browse_url("DEMO-101").unwrap(),
+            "https://example.atlassian.net/jira/browse/DEMO-101"
+        );
     }
 
     #[test]

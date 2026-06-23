@@ -3,6 +3,7 @@ mod client;
 mod commands;
 mod config;
 mod error;
+mod render;
 
 use clap::Parser;
 use std::process::ExitCode;

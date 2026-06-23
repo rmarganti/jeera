@@ -1,0 +1,98 @@
+{
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+  "id": "10001",
+  "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+  "key": "DEMO-101",
+  "fields": {
+    "summary": "Align application CSP with CDN configuration",
+    "components": [
+      {
+        "self": "https://example.atlassian.net/rest/api/3/component/2001",
+        "id": "2001",
+        "name": "Web Platform",
+        "description": "Shared web platform component"
+      }
+    ],
+    "status": {
+      "self": "https://example.atlassian.net/rest/api/3/status/10131",
+      "description": "Work is currently under review.",
+      "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+      "name": "In Review",
+      "id": "10131"
+    },
+    "issuetype": {
+      "self": "https://example.atlassian.net/rest/api/3/issuetype/10001",
+      "id": "10001",
+      "name": "Task"
+    },
+    "priority": {
+      "self": "https://example.atlassian.net/rest/api/3/priority/2",
+      "id": "2",
+      "name": "High"
+    },
+    "assignee": {
+      "self": "https://example.atlassian.net/rest/api/3/user?accountId=abc",
+      "accountId": "abc",
+      "displayName": "Alex Example",
+      "active": true
+    },
+    "reporter": {
+      "self": "https://example.atlassian.net/rest/api/3/user?accountId=def",
+      "accountId": "def",
+      "displayName": "Riley Reporter",
+      "active": true
+    },
+    "created": "2026-06-20T10:15:30.000+0000",
+    "updated": "2026-06-22T14:45:00.000+0000",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Review and align the CSP configuration."
+            }
+          ]
+        }
+      ]
+    },
+    "comment": {
+      "comments": [
+        {
+          "self": "https://example.atlassian.net/rest/api/3/issue/10001/comment/10000",
+          "id": "10000",
+          "author": {
+            "self": "https://example.atlassian.net/rest/api/3/user?accountId=ghi",
+            "accountId": "ghi",
+            "displayName": "Morgan Reviewer",
+            "active": true
+          },
+          "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Looks good to me."
+                  }
+                ]
+              }
+            ]
+          },
+          "created": "2026-06-22T15:00:00.000+0000",
+          "updated": "2026-06-22T15:00:00.000+0000"
+        }
+      ],
+      "self": "https://example.atlassian.net/rest/api/3/issue/10001/comment",
+      "maxResults": 1,
+      "total": 1,
+      "startAt": 0
+    }
+  }
+}

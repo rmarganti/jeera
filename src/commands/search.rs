@@ -3,7 +3,7 @@ use crate::client::{
     JiraClient,
     types::{SearchIssuesRequest, SearchIssuesResponse},
 };
-use crate::error::AppError;
+use crate::{error::AppError, render};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
@@ -52,7 +52,7 @@ pub fn run(client: &JiraClient, args: &SearchArgs) -> Result<(), AppError> {
     let output = execute(client, &command)?;
 
     if args.json {
-        render_json(io::stdout().lock(), &output)?;
+        render::render_json(io::stdout().lock(), &output)?;
     } else {
         render_human(io::stdout().lock(), &output)?;
     }
@@ -134,13 +134,6 @@ fn render_human(mut writer: impl Write, output: &SearchOutput) -> Result<(), App
         .map_err(|source| AppError::RenderOutput { source })?;
     }
 
-    Ok(())
-}
-
-fn render_json(mut writer: impl Write, output: &SearchOutput) -> Result<(), AppError> {
-    serde_json::to_writer_pretty(&mut writer, output)
-        .map_err(|source| AppError::EncodeJsonOutput { source })?;
-    writeln!(writer).map_err(|source| AppError::RenderOutput { source })?;
     Ok(())
 }
 
@@ -251,7 +244,7 @@ mod tests {
         let output = output_from_response(response);
         let mut rendered = Vec::new();
 
-        render_json(&mut rendered, &output).unwrap();
+        render::render_json(&mut rendered, &output).unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
@@ -293,7 +286,7 @@ mod tests {
         let output = SearchOutput { issues: Vec::new() };
         let mut rendered = Vec::new();
 
-        render_json(&mut rendered, &output).unwrap();
+        render::render_json(&mut rendered, &output).unwrap();
 
         assert_eq!(
             String::from_utf8(rendered).unwrap(),

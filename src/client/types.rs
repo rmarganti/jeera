@@ -213,6 +213,38 @@ pub struct BoardLocationResponse {
 }
 
 // ----------------------------------------------------------------
+// List Board Issues
+// ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct ListBoardIssuesRequest {
+    pub board_id: u64,
+    pub jql: Option<String>,
+    pub max_results: Option<u32>,
+    pub start_at: Option<u32>,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+#[serde(rename_all = "camelCase", bound(deserialize = "F: Deserialize<'de>"))]
+pub struct ListBoardIssuesResponse<F = Value> {
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub start_at: u32,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub max_results: u32,
+    #[allow(dead_code)]
+    pub total: Option<u32>,
+    #[allow(dead_code)]
+    pub is_last: Option<bool>,
+    #[serde(default)]
+    pub issues: Vec<IssueResponse<F>>,
+}
+
+// ----------------------------------------------------------------
 // Board Configuration
 // ----------------------------------------------------------------
 

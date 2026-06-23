@@ -1,7 +1,7 @@
 use crate::client::types::{
     GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetIssueRequest, GetIssueResponse,
-    JiraError, JiraErrorResponse, ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest,
-    SearchIssuesResponse,
+    JiraError, JiraErrorResponse, ListBoardIssuesRequest, ListBoardIssuesResponse,
+    ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest, SearchIssuesResponse,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
@@ -83,6 +83,42 @@ impl JiraClient {
         }
 
         self.send_json::<(), ListBoardsResponse>(ureq::http::Method::GET, &path, None)
+    }
+
+    #[allow(dead_code)]
+    pub fn list_board_issues<F>(
+        &self,
+        request: &ListBoardIssuesRequest,
+    ) -> Result<ListBoardIssuesResponse<F>, JiraError>
+    where
+        F: DeserializeOwned,
+    {
+        let mut path = format!("rest/agile/1.0/board/{}/issue", request.board_id);
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+
+        if let Some(jql) = &request.jql {
+            query.append_pair("jql", jql);
+        }
+
+        if let Some(max_results) = request.max_results {
+            query.append_pair("maxResults", &max_results.to_string());
+        }
+
+        if let Some(start_at) = request.start_at {
+            query.append_pair("startAt", &start_at.to_string());
+        }
+
+        if !request.fields.is_empty() {
+            query.append_pair("fields", &request.fields.join(","));
+        }
+
+        let query = query.finish();
+        if !query.is_empty() {
+            path.push('?');
+            path.push_str(&query);
+        }
+
+        self.send_json::<(), ListBoardIssuesResponse<F>>(ureq::http::Method::GET, &path, None)
     }
 
     pub fn issue_browse_url(&self, issue_key: &str) -> Result<String, JiraError> {
@@ -460,6 +496,44 @@ mod tests {
                 .and_then(|l| l.project_key.as_deref()),
             Some("GCCDEV")
         );
+    }
+
+    #[test]
+    fn list_board_issues_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"startAt":0,"maxResults":2,"total":2,"isLast":false,"issues":[{"id":"10001","key":"DEMO-101","self":"https://example.atlassian.net/rest/api/3/issue/10001","fields":{"summary":"One"}},{"id":"10002","key":"DEMO-102","self":"https://example.atlassian.net/rest/api/3/issue/10002","fields":{"summary":"Two"}}]}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = ListBoardIssuesRequest {
+            board_id: 215,
+            jql: Some("component = \"QQMS\"".to_string()),
+            max_results: Some(2),
+            start_at: Some(10),
+            fields: vec!["summary".to_string(), "status".to_string()],
+        };
+
+        let response: ListBoardIssuesResponse<Value> = client.list_board_issues(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let headers = captured.headers.to_ascii_lowercase();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(
+            captured.path,
+            "/rest/agile/1.0/board/215/issue?jql=component+%3D+%22QQMS%22&maxResults=2&startAt=10&fields=summary%2Cstatus"
+        );
+        assert!(headers.contains("accept: application/json"));
+        assert!(headers.contains("authorization: bearer secret-token"));
+        assert!(captured.body.is_empty());
+        assert_eq!(response.issues.len(), 2);
+        assert_eq!(response.issues[0].key, "DEMO-101");
+        assert_eq!(response.total, Some(2));
+        assert_eq!(response.is_last, Some(false));
     }
 
     #[test]

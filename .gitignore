@@ -1,2 +1,8 @@
 /target
+
+# Local credentials/config. Real Jira tokens should stay outside git.
 /jeera.toml
+/jeera.json
+/settings.json
+/.env
+/.env.*

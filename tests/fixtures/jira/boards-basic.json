@@ -1,0 +1,42 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "isLast": true,
+  "values": [
+    {
+      "id": 215,
+      "name": "GCCDEV Kanban Board",
+      "type": "kanban",
+      "location": {
+        "projectId": 10001,
+        "projectKey": "GCCDEV",
+        "projectName": "GCCDEV",
+        "displayName": "GCCDEV"
+      }
+    },
+    {
+      "id": 212,
+      "name": "Commercial Reports",
+      "type": "kanban",
+      "location": {
+        "projectId": 10001,
+        "projectKey": "GCCDEV",
+        "projectName": "GCCDEV",
+        "displayName": "GCCDEV"
+      }
+    },
+    {
+      "id": 314,
+      "name": "Operations Triage",
+      "type": "scrum",
+      "location": {
+        "displayName": "Operations Workspace"
+      }
+    },
+    {
+      "id": 999,
+      "name": "Personal Board",
+      "type": "simple"
+    }
+  ]
+}

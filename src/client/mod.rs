@@ -1,6 +1,7 @@
 use crate::client::types::{
     GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetIssueRequest, GetIssueResponse,
-    JiraError, JiraErrorResponse, SearchIssuesRequest, SearchIssuesResponse,
+    JiraError, JiraErrorResponse, ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest,
+    SearchIssuesResponse,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Serialize, de::DeserializeOwned};
@@ -65,6 +66,23 @@ impl JiraClient {
 
     pub fn default_board_id(&self) -> Option<u64> {
         self.config.default_board_id
+    }
+
+    pub fn list_boards(
+        &self,
+        request: &ListBoardsRequest,
+    ) -> Result<ListBoardsResponse, JiraError> {
+        let mut path = "rest/agile/1.0/board".to_string();
+
+        if let Some(project_key_or_id) = &request.project_key_or_id {
+            let query = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("projectKeyOrId", project_key_or_id)
+                .finish();
+            path.push('?');
+            path.push_str(&query);
+        }
+
+        self.send_json::<(), ListBoardsResponse>(ureq::http::Method::GET, &path, None)
     }
 
     pub fn issue_browse_url(&self, issue_key: &str) -> Result<String, JiraError> {
@@ -408,6 +426,40 @@ mod tests {
         assert_eq!(body["jql"], "project = DEMO ORDER BY updated DESC");
         assert_eq!(body["maxResults"], 2);
         assert_eq!(body["fields"], serde_json::json!(["summary", "status"]));
+    }
+
+    #[test]
+    fn list_boards_sends_expected_request() {
+        let (base_url, rx) = spawn_server("200 OK", fixture("boards-basic.json"));
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = ListBoardsRequest {
+            project_key_or_id: Some("GCCDEV".to_string()),
+        };
+
+        let response = client.list_boards(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let headers = captured.headers.to_ascii_lowercase();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(captured.path, "/rest/agile/1.0/board?projectKeyOrId=GCCDEV");
+        assert!(headers.contains("accept: application/json"));
+        assert!(headers.contains("authorization: bearer secret-token"));
+        assert!(captured.body.is_empty());
+        assert_eq!(response.values.len(), 4);
+        assert_eq!(response.values[0].id, 215);
+        assert_eq!(response.values[0].board_type, "kanban");
+        assert_eq!(
+            response.values[0]
+                .location
+                .as_ref()
+                .and_then(|l| l.project_key.as_deref()),
+            Some("GCCDEV")
+        );
     }
 
     #[test]

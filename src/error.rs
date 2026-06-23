@@ -9,6 +9,9 @@ pub enum AppError {
     #[error("while loading config: {source}")]
     LoadConfig { source: ConfigError },
 
+    #[error("invalid boards: {reason}")]
+    InvalidBoards { reason: String },
+
     #[error("invalid search: {reason}")]
     InvalidSearch { reason: String },
 
@@ -24,6 +27,9 @@ pub enum AppError {
         #[source]
         source: ParseIntError,
     },
+
+    #[error("while executing boards: {source}")]
+    ExecuteBoards { source: JiraError },
 
     #[error("while executing search: {source}")]
     ExecuteSearch { source: JiraError },

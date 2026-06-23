@@ -9,8 +9,18 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    Boards(BoardsArgs),
     Search(Box<SearchArgs>),
     Show(ShowArgs),
+}
+
+#[derive(Debug, Args, Default)]
+pub struct BoardsArgs {
+    #[arg(long)]
+    pub project: Option<String>,
+
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

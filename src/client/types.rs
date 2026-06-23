@@ -167,6 +167,52 @@ pub struct SearchIssuesResponse<F = Value> {
 }
 
 // ----------------------------------------------------------------
+// List Boards
+// ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct ListBoardsRequest {
+    pub project_key_or_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListBoardsResponse {
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub max_results: u32,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub start_at: u32,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub is_last: bool,
+    #[serde(default)]
+    pub values: Vec<BoardResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardResponse {
+    pub id: u64,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub board_type: String,
+    pub location: Option<BoardLocationResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardLocationResponse {
+    #[allow(dead_code)]
+    pub project_id: Option<u64>,
+    pub project_key: Option<String>,
+    pub project_name: Option<String>,
+    pub display_name: Option<String>,
+    pub name: Option<String>,
+}
+
+// ----------------------------------------------------------------
 // Board Configuration
 // ----------------------------------------------------------------
 

@@ -11,6 +11,7 @@ pub(crate) struct PreparedIssueSearch {
     request: SearchIssuesRequest,
 }
 
+/// Completed search execution built from effective search intent and final JQL.
 #[derive(Debug)]
 pub struct SearchExecution {
     effective_intent: SearchIntent,
@@ -40,6 +41,7 @@ impl SearchExecution {
         }
     }
 
+    /// Returns search intent after applying profile defaults and CLI overrides.
     pub fn effective_intent(&self) -> &SearchIntent {
         &self.effective_intent
     }

@@ -23,6 +23,7 @@ pub(super) enum HumanColumns {
     Custom(Vec<SearchColumn>),
 }
 
+/// Normalized search request derived from user inputs such as CLI/search args.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchIntent {
     pub(super) json: bool,
@@ -57,6 +58,7 @@ impl SearchIntent {
         }
     }
 
+    /// Reconstructs CLI-shaped search args from normalized intent.
     pub(super) fn to_search_args(&self) -> SearchArgs {
         SearchArgs {
             json: self.json,

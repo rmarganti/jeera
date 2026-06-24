@@ -1,7 +1,4 @@
 //! Jira issue search domain module.
-//!
-//! The command adapter enters through `execute`; internal helpers prepare requests, merge
-//! profiles, and render human output behind this module's interface.
 
 mod board;
 mod intent;

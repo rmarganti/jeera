@@ -119,3 +119,111 @@ pub(crate) fn parse_board_filter_id(board_id: u64, filter_id: &str) -> Result<u6
             source,
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::SearchArgs;
+    use crate::issue_search::tests_support::{
+        board_filter as test_board_filter, board_response, prepare_with_board_source_for_args,
+    };
+
+    #[test]
+    fn numeric_board_reference_bypasses_name_resolution() {
+        let prepared = prepare_with_board_source_for_args(
+            &SearchArgs {
+                board: Some("215".to_string()),
+                ..Default::default()
+            },
+            None,
+            |_| panic!("numeric board ids should not invoke board-name resolution"),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(test_board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn named_board_reference_resolves_before_loading_board_filter() {
+        let prepared = prepare_with_board_source_for_args(
+            &SearchArgs {
+                board: Some("SAMPLE Kanban Board".to_string()),
+                component: vec!["QQMS".to_string()],
+                ..Default::default()
+            },
+            None,
+            |board_name| {
+                assert_eq!(board_name, "SAMPLE Kanban Board");
+                Ok(215)
+            },
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(test_board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn board_name_matching_is_case_insensitive_when_needed() {
+        let boards = vec![board_response(215, "SAMPLE Kanban Board", "kanban")];
+
+        assert_eq!(
+            find_board_id_by_name(&boards, "sample kanban board").unwrap(),
+            215
+        );
+    }
+
+    #[test]
+    fn unknown_board_name_is_reported_clearly() {
+        let boards = vec![board_response(215, "SAMPLE Kanban Board", "kanban")];
+
+        let error = find_board_id_by_name(&boards, "Missing Board").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: no Jira board named \"Missing Board\" found; try `jeera boards` to discover available boards or pass a numeric --board ID"
+        );
+    }
+
+    #[test]
+    fn ambiguous_board_name_is_reported_clearly() {
+        let boards = vec![
+            board_response(215, "Team Board", "kanban"),
+            board_response(314, "Team Board", "scrum"),
+        ];
+
+        let error = find_board_id_by_name(&boards, "Team Board").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: board name \"Team Board\" is ambiguous; matching board ids: 215, 314. Try `jeera boards` or pass a numeric --board ID"
+        );
+    }
+
+    #[test]
+    fn invalid_board_filter_id_is_reported_instead_of_falling_back_to_board_id() {
+        let error = parse_board_filter_id(215, "not-a-filter-id").unwrap_err();
+
+        assert!(matches!(
+            error,
+            AppError::InvalidBoardFilterId {
+                board_id: 215,
+                filter_id,
+                ..
+            } if filter_id == "not-a-filter-id"
+        ));
+    }
+}

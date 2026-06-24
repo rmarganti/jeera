@@ -26,17 +26,6 @@ use prepare::{execute_prepared, prepare};
 use profile::merge_search_profile;
 use render::{build_next_page_command, render_human_output};
 
-#[cfg(test)]
-use crate::cli::SearchArgs;
-#[cfg(test)]
-use crate::client::types::BoardResponse;
-#[cfg(test)]
-use board::{BoardJqlFilter, find_board_id_by_name, parse_board_filter_id};
-#[cfg(test)]
-use output::{SearchIssueFields, output_from_search_response};
-#[cfg(test)]
-use prepare::PreparedIssueSearch;
-
 const SEARCH_MIN_LIMIT: u32 = 1;
 const SEARCH_MAX_LIMIT: u32 = 100;
 const DEFAULT_SEARCH_LIMIT: u32 = 50;
@@ -77,26 +66,6 @@ pub fn render_human(mut writer: impl Write, execution: &SearchExecution) -> Resu
 }
 
 #[cfg(test)]
-fn prepare_with_board_source<R, F>(
-    intent: &SearchIntent,
-    default_board_id: Option<u64>,
-    resolve_board_name: R,
-    load_board_filter: F,
-) -> Result<PreparedIssueSearch, AppError>
-where
-    R: FnMut(&str) -> Result<u64, AppError>,
-    F: FnOnce(u64) -> Result<BoardJqlFilter, AppError>,
-{
-    prepare::prepare_with_board_source(
-        intent,
-        default_board_id,
-        resolve_board_name,
-        load_board_filter,
-        SEARCH_MIN_LIMIT,
-        SEARCH_MAX_LIMIT,
-        DEFAULT_SEARCH_LIMIT,
-    )
-}
-
-#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_support;

@@ -340,3 +340,189 @@ fn validate_sort_field(sort: &str) -> Result<(), AppError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::cli::SearchArgs;
+    use crate::error::AppError;
+    use crate::issue_search::tests_support::prepare_with_board_source_for_args;
+
+    #[test]
+    fn search_requires_an_explicit_or_configured_restriction() {
+        let error = prepare_with_board_source_for_args(
+            &SearchArgs::default(),
+            None,
+            |_| unreachable!(),
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, AppError::InvalidSearch { .. }));
+    }
+
+    #[test]
+    fn search_rejects_zero_limit() {
+        let error = prepare_with_board_source_for_args(
+            &SearchArgs {
+                assignee: Some("me".to_string()),
+                limit: Some(0),
+                ..Default::default()
+            },
+            None,
+            |_| unreachable!(),
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: --limit must be between 1 and 100"
+        );
+    }
+
+    #[test]
+    fn search_rejects_overly_large_limit() {
+        let error = prepare_with_board_source_for_args(
+            &SearchArgs {
+                assignee: Some("me".to_string()),
+                limit: Some(101),
+                ..Default::default()
+            },
+            None,
+            |_| unreachable!(),
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid search: --limit must be between 1 and 100"
+        );
+    }
+
+    #[test]
+    fn search_rejects_empty_string_filters() {
+        for args in [
+            SearchArgs {
+                board: Some("   ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                project: Some("   ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                assignee: Some("".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                reporter: Some(" ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                status_category: Some("\t".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                query: Some(" ".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                text: Some("".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                jql: Some("\n".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                next_page_token: Some(" ".to_string()),
+                assignee: Some("me".to_string()),
+                ..Default::default()
+            },
+            SearchArgs {
+                columns: Some(" ".to_string()),
+                assignee: Some("me".to_string()),
+                ..Default::default()
+            },
+        ] {
+            let error = prepare_with_board_source_for_args(
+                &args,
+                None,
+                |_| unreachable!(),
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("cannot"));
+        }
+    }
+
+    #[test]
+    fn search_rejects_invalid_columns() {
+        for columns in ["key,,summary", "key,unknown"] {
+            let error = prepare_with_board_source_for_args(
+                &SearchArgs {
+                    assignee: Some("me".to_string()),
+                    columns: Some(columns.to_string()),
+                    ..Default::default()
+                },
+                None,
+                |_| unreachable!(),
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+
+            assert!(error.to_string().contains("--columns"));
+        }
+    }
+
+    #[test]
+    fn search_rejects_empty_values_in_multi_value_filters() {
+        for args in [
+            SearchArgs {
+                status: vec!["In Progress".to_string(), " ".to_string()],
+                ..Default::default()
+            },
+            SearchArgs {
+                issue_type: vec!["Bug".to_string(), "".to_string()],
+                ..Default::default()
+            },
+            SearchArgs {
+                component: vec!["QQMS".to_string(), "\t".to_string()],
+                ..Default::default()
+            },
+            SearchArgs {
+                label: vec!["customer".to_string(), " ".to_string()],
+                ..Default::default()
+            },
+        ] {
+            let error = prepare_with_board_source_for_args(
+                &args,
+                None,
+                |_| unreachable!(),
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("cannot contain empty values"));
+        }
+    }
+
+    #[test]
+    fn search_rejects_invalid_sort_values() {
+        for sort in ["", "   ", "updated desc", "updated,created"] {
+            let error = prepare_with_board_source_for_args(
+                &SearchArgs {
+                    assignee: Some("me".to_string()),
+                    sort: Some(sort.to_string()),
+                    ..Default::default()
+                },
+                None,
+                |_| unreachable!(),
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+
+            assert!(error.to_string().contains("--sort"));
+        }
+    }
+}

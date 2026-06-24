@@ -215,3 +215,124 @@ pub(super) fn render_components(issue: &SearchIssueOutput) -> String {
         format!("{DIM}{components}{RESET}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::issue_search::tests_support::{parse_fixture, render_human};
+    use crate::issue_search::{SearchColumn, SearchOutput};
+
+    #[test]
+    fn render_human_includes_colorized_key_status_and_components_when_present() {
+        let output = parse_fixture("search-basic.json");
+        let mut rendered = Vec::new();
+
+        render_human(&mut rendered, &output, &[], None).unwrap();
+
+        let rendered = String::from_utf8(rendered).unwrap();
+        assert!(rendered.contains("\u{1b}[1m\u{1b}[36mDEMO-101\u{1b}[0m [\u{1b}[33mIn Review\u{1b}[0m] Align application CSP with CDN configuration (\u{1b}[2mWeb Platform\u{1b}[0m)"));
+        assert!(rendered.contains("\u{1b}[1m\u{1b}[36mDEMO-102\u{1b}[0m [\u{1b}[32mClosed\u{1b}[0m] Support iframe parent messaging (\u{1b}[2mWeb Platform\u{1b}[0m)"));
+        assert!(rendered.ends_with("Next page token: sanitized-next-page-token\n"));
+    }
+
+    #[test]
+    fn render_human_uses_selected_columns_and_colorizes_key_and_status() {
+        let output = parse_fixture("search-columns.json");
+        let mut rendered = Vec::new();
+
+        render_human(
+            &mut rendered,
+            &output,
+            &[
+                SearchColumn::Key,
+                SearchColumn::Type,
+                SearchColumn::Status,
+                SearchColumn::Assignee,
+                SearchColumn::Priority,
+                SearchColumn::Updated,
+                SearchColumn::Summary,
+            ],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            concat!(
+                "\u{1b}[1m\u{1b}[36mDEMO-201\u{1b}[0m | Bug | \u{1b}[33mIn Progress\u{1b}[0m | Mina Li | High | 2026-06-22T14:45:00.000+0000 | Investigate webhook retries\n",
+                "\u{1b}[1m\u{1b}[36mDEMO-202\u{1b}[0m | Task | \u{1b}[2mTo Do\u{1b}[0m | Unassigned | Unprioritized | 2026-06-21T09:15:00.000+0000 | Document fallback behavior\n"
+            )
+        );
+    }
+
+    #[test]
+    fn render_human_omits_empty_components_suffix() {
+        let output = parse_fixture("search-no-components.json");
+        let mut rendered = Vec::new();
+
+        render_human(&mut rendered, &output, &[], None).unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            "\u{1b}[1m\u{1b}[36mDEMO-104\u{1b}[0m [\u{1b}[32mClosed\u{1b}[0m] Populate missing environment values\n"
+        );
+    }
+
+    #[test]
+    fn render_human_colorizes_components_in_custom_columns() {
+        let output = parse_fixture("search-basic.json");
+        let mut rendered = Vec::new();
+
+        render_human(
+            &mut rendered,
+            &output,
+            &[
+                SearchColumn::Key,
+                SearchColumn::Components,
+                SearchColumn::Summary,
+            ],
+            None,
+        )
+        .unwrap();
+
+        assert!(String::from_utf8(rendered).unwrap().contains(
+            "\u{1b}[1m\u{1b}[36mDEMO-101\u{1b}[0m | \u{1b}[2mWeb Platform\u{1b}[0m | Align application CSP with CDN configuration"
+        ));
+    }
+
+    #[test]
+    fn render_human_shows_empty_state_when_no_issues_match() {
+        let output = SearchOutput {
+            issues: Vec::new(),
+            is_last: true,
+            next_page_token: None,
+        };
+        let mut rendered = Vec::new();
+
+        render_human(&mut rendered, &output, &[], None).unwrap();
+
+        assert_eq!(String::from_utf8(rendered).unwrap(), "No issues found.\n");
+    }
+
+    #[test]
+    fn render_human_shows_next_page_token_when_available() {
+        let output = SearchOutput {
+            issues: Vec::new(),
+            is_last: false,
+            next_page_token: Some("abc".to_string()),
+        };
+        let mut rendered = Vec::new();
+
+        render_human(
+            &mut rendered,
+            &output,
+            &[],
+            Some("jeera search --next-page-token abc"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            "No issues found.\nNext page token: abc\nNext page command: jeera search --next-page-token abc\n"
+        );
+    }
+}

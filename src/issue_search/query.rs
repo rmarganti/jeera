@@ -169,3 +169,341 @@ pub(super) fn search_fields(json: bool, human_columns: &HumanColumns) -> Vec<Str
 
     fields
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::cli::SearchArgs;
+    use crate::issue_search::tests_support::{
+        board_filter, prepare_with_board_source_for_args, prepare_without_board,
+    };
+
+    #[test]
+    fn positional_query_is_an_explicit_search_restriction() {
+        let prepared = prepare_without_board(&SearchArgs {
+            query: Some("reporting".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "text ~ \"reporting\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn positional_query_combines_with_default_board_filter() {
+        let prepared = prepare_with_board_source_for_args(
+            &SearchArgs {
+                query: Some("reporting".to_string()),
+                ..Default::default()
+            },
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.request().jql,
+            "filter = 10492 AND (fixVersion is EMPTY) AND text ~ \"reporting\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn positional_query_combines_with_raw_jql() {
+        let prepared = prepare_without_board(&SearchArgs {
+            query: Some("reporting".to_string()),
+            jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "(project = SAMPLE) AND text ~ \"reporting\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn positional_query_and_text_flag_are_combined_with_and() {
+        let prepared = prepare_without_board(&SearchArgs {
+            query: Some("reporting".to_string()),
+            text: Some("billing".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "text ~ \"reporting\" AND text ~ \"billing\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn search_without_board_defaults_to_updated_desc() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.jql(),
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn board_search_defaults_to_rank_asc() {
+        let prepared = prepare_with_board_source_for_args(
+            &SearchArgs {
+                component: vec!["QQMS".to_string()],
+                ..Default::default()
+            },
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn rank_sort_alias_maps_to_rank_asc_without_explicit_direction() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            sort: Some("rank".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(prepared.jql(), "assignee = currentUser() ORDER BY Rank ASC");
+    }
+
+    #[test]
+    fn explicit_sort_still_defaults_to_desc_for_non_rank_fields() {
+        let prepared = prepare_with_board_source_for_args(
+            &SearchArgs {
+                component: vec!["QQMS".to_string()],
+                sort: Some("updated".to_string()),
+                ..Default::default()
+            },
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn search_request_contains_expected_fields() {
+        let args = SearchArgs {
+            assignee: Some("me".to_string()),
+            ..Default::default()
+        };
+        let prepared = prepare_without_board(&args);
+        let request = prepared.request();
+
+        assert_eq!(
+            prepared.jql(),
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
+        assert_eq!(
+            request.jql,
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
+        assert_eq!(request.max_results, Some(50));
+        assert_eq!(request.fields, vec!["summary", "status", "components"]);
+    }
+
+    #[test]
+    fn search_request_fetches_only_selected_extra_human_columns() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            columns: Some("key,type,status,assignee,updated,summary".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().fields,
+            vec![
+                "summary",
+                "status",
+                "components",
+                "issuetype",
+                "assignee",
+                "updated"
+            ]
+        );
+    }
+
+    #[test]
+    fn search_json_request_fetches_all_supported_columns_consistently() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            json: true,
+            columns: Some("key,priority".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().fields,
+            vec![
+                "summary",
+                "status",
+                "components",
+                "issuetype",
+                "assignee",
+                "priority",
+                "updated"
+            ]
+        );
+    }
+
+    #[test]
+    fn search_request_uses_pagination_args() {
+        let args = SearchArgs {
+            assignee: Some("me".to_string()),
+            limit: Some(25),
+            next_page_token: Some("token-123".to_string()),
+            ..Default::default()
+        };
+        let prepared = prepare_without_board(&args);
+        let request = prepared.request();
+
+        assert_eq!(request.max_results, Some(25));
+        assert_eq!(request.next_page_token, Some("token-123".to_string()));
+    }
+
+    #[test]
+    fn explicit_desc_keeps_updated_desc_for_non_board_searches() {
+        let prepared = prepare_without_board(&SearchArgs {
+            assignee: Some("me".to_string()),
+            desc: true,
+            ..Default::default()
+        });
+
+        assert_eq!(
+            prepared.request().jql,
+            "assignee = currentUser() ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn explicit_desc_flips_board_default_rank_sort_to_desc() {
+        let prepared = prepare_with_board_source_for_args(
+            &SearchArgs {
+                component: vec!["QQMS".to_string()],
+                desc: true,
+                ..Default::default()
+            },
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.request().jql,
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank DESC"
+        );
+    }
+
+    #[test]
+    fn raw_jql_can_be_combined_with_explicit_filters() {
+        let args = SearchArgs {
+            jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
+            component: vec!["QQMS".to_string()],
+            ..Default::default()
+        };
+        let prepared = prepare_without_board(&args);
+
+        assert_eq!(
+            prepared.request().jql,
+            "(project = SAMPLE) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn board_filter_is_just_another_jql_clause() {
+        let args = SearchArgs {
+            component: vec!["QQMS".to_string()],
+            ..Default::default()
+        };
+        let prepared = prepare_with_board_source_for_args(
+            &args,
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.request().jql,
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn final_jql_keeps_board_derived_clauses_when_combining_with_raw_jql() {
+        let args = SearchArgs {
+            jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
+            component: vec!["QQMS".to_string()],
+            ..Default::default()
+        };
+        let prepared = prepare_with_board_source_for_args(
+            &args,
+            Some(215),
+            |_| unreachable!(),
+            |board_id| {
+                assert_eq!(board_id, 215);
+                Ok(board_filter(10492, "fixVersion is EMPTY"))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.jql(),
+            "(project = SAMPLE) AND filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+        );
+    }
+
+    #[test]
+    fn structured_filters_are_combined_and_values_are_escaped() {
+        let args = SearchArgs {
+            project: Some("SAMPLE".to_string()),
+            assignee: Some("me".to_string()),
+            status: vec!["In Progress".to_string(), "Ready \"Soon\"".to_string()],
+            component: vec!["QQMS".to_string()],
+            text: Some("reporting".to_string()),
+            open: true,
+            ..Default::default()
+        };
+        let prepared = prepare_without_board(&args);
+
+        assert_eq!(
+            prepared.request().jql,
+            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
+        );
+    }
+}

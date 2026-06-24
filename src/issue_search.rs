@@ -1,7 +1,7 @@
 //! Jira issue search domain module.
 //!
-//! The command adapter enters through `prepare` and `execute_prepared`; tests and future
-//! callers can use `prepare` when they only need the prepared Jira request.
+//! The command adapter enters through `execute`; internal helpers prepare requests, merge
+//! profiles, and render human output behind this module's interface.
 
 use crate::cli::SearchArgs;
 use crate::client::{
@@ -15,6 +15,7 @@ use crate::error::AppError;
 use crate::jql::{self, Clause, Order, Query, SortDirection, UserRef, Value};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::io::Write;
 
 const SEARCH_MIN_LIMIT: u32 = 1;
@@ -23,13 +24,12 @@ const DEFAULT_SEARCH_LIMIT: u32 = 50;
 
 /// Prepared search intent after validation, board resolution, JQL assembly, and field selection.
 #[derive(Debug)]
-pub struct PreparedIssueSearch {
+struct PreparedIssueSearch {
     request: SearchIssuesRequest,
-    human_columns: HumanColumns,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchColumn {
+pub enum SearchColumn {
     Key,
     Status,
     Summary,
@@ -44,6 +44,45 @@ pub(crate) enum SearchColumn {
 enum HumanColumns {
     Default,
     Custom(Vec<SearchColumn>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchIntent {
+    json: bool,
+    debug_jql: bool,
+    profile: Option<String>,
+    query: Option<String>,
+    jql: Option<String>,
+    board: Option<BoardSelector>,
+    project: Option<String>,
+    assignee: Option<String>,
+    unassigned: bool,
+    reporter: Option<String>,
+    status: Vec<String>,
+    status_category: Option<String>,
+    issue_type: Vec<String>,
+    component: Vec<String>,
+    label: Vec<String>,
+    text: Option<String>,
+    open: bool,
+    limit: Option<u32>,
+    next_page_token: Option<String>,
+    human_columns: HumanColumns,
+    sort: Option<String>,
+    sort_direction: Option<SortDirection>,
+}
+
+#[derive(Debug)]
+pub struct SearchExecution {
+    effective_intent: SearchIntent,
+    final_jql: String,
+    output: SearchOutput,
+    continuation: Option<SearchContinuation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchContinuation {
+    next_page_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,8 +162,39 @@ struct SearchIssueOutput {
     updated: Option<String>,
 }
 
-/// Executes a previously prepared Jira issue search.
-pub fn execute_prepared(
+/// Runs a complete Jira issue search behind the domain interface.
+pub fn execute(client: &JiraClient, intent: SearchIntent) -> Result<SearchExecution, AppError> {
+    let effective_intent = merge_search_profile(client, &intent)?;
+    let prepared = prepare(client, &effective_intent)?;
+    let output = execute_prepared(client, &prepared)?;
+    let continuation = (!output.is_last)
+        .then(|| output.next_page_token.clone())
+        .flatten()
+        .map(|next_page_token| SearchContinuation { next_page_token });
+
+    Ok(SearchExecution {
+        effective_intent,
+        final_jql: prepared.jql().to_string(),
+        output,
+        continuation,
+    })
+}
+
+/// Human rendering is search-specific, while JSON rendering stays generic in `render`.
+pub fn render_human(mut writer: impl Write, execution: &SearchExecution) -> Result<(), AppError> {
+    let effective_intent = execution.effective_intent();
+    let next_page_command = execution
+        .continuation()
+        .map(|continuation| build_next_page_command(effective_intent, continuation));
+    render_human_output(
+        &mut writer,
+        &execution.output,
+        effective_intent.human_columns(),
+        next_page_command.as_deref(),
+    )
+}
+
+fn execute_prepared(
     client: &JiraClient,
     prepared: &PreparedIssueSearch,
 ) -> Result<SearchOutput, AppError> {
@@ -135,18 +205,16 @@ pub fn execute_prepared(
     Ok(output_from_search_response(response))
 }
 
-/// Builds the Jira request without executing it; useful as the module's narrow test surface.
-pub fn prepare(client: &JiraClient, args: &SearchArgs) -> Result<PreparedIssueSearch, AppError> {
+fn prepare(client: &JiraClient, intent: &SearchIntent) -> Result<PreparedIssueSearch, AppError> {
     prepare_with_board_source(
-        args,
+        intent,
         client.default_board_id(),
         |board_name| resolve_board_name(client, board_name),
         |board_id| board_filter(client, board_id),
     )
 }
 
-/// Human rendering is search-specific, while JSON rendering stays generic in `render`.
-pub(crate) fn render_human(
+fn render_human_output(
     mut writer: impl Write,
     output: &SearchOutput,
     columns: &[SearchColumn],
@@ -198,31 +266,95 @@ pub(crate) fn render_human(
     Ok(())
 }
 
-impl SearchOutput {
-    pub(crate) fn is_last(&self) -> bool {
-        self.is_last
+impl SearchExecution {
+    pub fn output(&self) -> &SearchOutput {
+        &self.output
     }
 
-    pub(crate) fn next_page_token(&self) -> Option<&str> {
-        self.next_page_token.as_deref()
+    pub fn output_mode(&self) -> SearchOutputMode {
+        SearchOutputMode {
+            json: self.effective_intent.json,
+        }
+    }
+
+    pub fn effective_intent(&self) -> &SearchIntent {
+        &self.effective_intent
+    }
+
+    pub fn final_jql(&self) -> &str {
+        &self.final_jql
+    }
+
+    pub fn should_debug_jql(&self) -> bool {
+        self.effective_intent.debug_jql
+    }
+
+    pub fn continuation(&self) -> Option<&SearchContinuation> {
+        self.continuation.as_ref()
     }
 }
 
-impl PreparedIssueSearch {
-    /// Exposes only the transport request; search preparation remains inside this module.
-    pub fn request(&self) -> &SearchIssuesRequest {
-        &self.request
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchOutputMode {
+    json: bool,
+}
 
-    pub fn jql(&self) -> &str {
-        &self.request.jql
+impl SearchOutputMode {
+    pub fn is_json(self) -> bool {
+        self.json
     }
+}
 
-    pub(crate) fn human_columns(&self) -> &[SearchColumn] {
+impl SearchIntent {
+    fn human_columns(&self) -> &[SearchColumn] {
         match &self.human_columns {
             HumanColumns::Default => &[],
             HumanColumns::Custom(columns) => columns,
         }
+    }
+
+    fn to_search_args(&self) -> SearchArgs {
+        SearchArgs {
+            json: self.json,
+            profile: self.profile.clone(),
+            query: self.query.clone(),
+            jql: self.jql.clone(),
+            board: self.board.as_ref().map(BoardSelector::to_cli_value),
+            project: self.project.clone(),
+            assignee: self.assignee.clone(),
+            unassigned: self.unassigned,
+            reporter: self.reporter.clone(),
+            status: self.status.clone(),
+            status_category: self.status_category.clone(),
+            issue_type: self.issue_type.clone(),
+            component: self.component.clone(),
+            label: self.label.clone(),
+            text: self.text.clone(),
+            open: self.open,
+            limit: self.limit,
+            next_page_token: self.next_page_token.clone(),
+            columns: serialize_human_columns(&self.human_columns),
+            debug_jql: self.debug_jql,
+            sort: self.sort.clone(),
+            asc: self.sort_direction == Some(SortDirection::Asc),
+            desc: self.sort_direction == Some(SortDirection::Desc),
+        }
+    }
+}
+
+impl SearchContinuation {
+    pub fn next_page_token(&self) -> &str {
+        &self.next_page_token
+    }
+}
+
+impl PreparedIssueSearch {
+    fn request(&self) -> &SearchIssuesRequest {
+        &self.request
+    }
+
+    fn jql(&self) -> &str {
+        &self.request.jql
     }
 }
 
@@ -290,6 +422,242 @@ impl SearchColumn {
     }
 }
 
+impl TryFrom<&SearchArgs> for SearchIntent {
+    type Error = AppError;
+
+    fn try_from(args: &SearchArgs) -> Result<Self, Self::Error> {
+        Ok(Self {
+            json: args.json,
+            debug_jql: args.debug_jql,
+            profile: args.profile.clone(),
+            query: args.query.clone(),
+            jql: args.jql.clone(),
+            board: args
+                .board
+                .as_deref()
+                .map(str::trim)
+                .map(parse_board_selector)
+                .transpose()?,
+            project: args.project.clone(),
+            assignee: args.assignee.clone(),
+            unassigned: args.unassigned,
+            reporter: args.reporter.clone(),
+            status: args.status.clone(),
+            status_category: args.status_category.clone(),
+            issue_type: args.issue_type.clone(),
+            component: args.component.clone(),
+            label: args.label.clone(),
+            text: args.text.clone(),
+            open: args.open,
+            limit: args.limit,
+            next_page_token: args.next_page_token.clone(),
+            human_columns: parse_human_columns(args.columns.as_deref())?,
+            sort: args.sort.clone(),
+            sort_direction: if args.asc {
+                Some(SortDirection::Asc)
+            } else if args.desc {
+                Some(SortDirection::Desc)
+            } else {
+                None
+            },
+        })
+    }
+}
+
+impl BoardSelector {
+    fn to_cli_value(&self) -> String {
+        match self {
+            Self::Id(board_id) => board_id.to_string(),
+            Self::Name(board_name) => board_name.clone(),
+        }
+    }
+}
+
+fn merge_search_profile(
+    client: &JiraClient,
+    intent: &SearchIntent,
+) -> Result<SearchIntent, AppError> {
+    let args = intent.to_search_args();
+    let Some(profile_name) = args.profile.as_deref() else {
+        return Ok(intent.clone());
+    };
+
+    let profile = client
+        .search_profile(profile_name)
+        .ok_or_else(|| AppError::InvalidSearch {
+            reason: format!("unknown search profile {profile_name:?}"),
+        })?;
+
+    let (assignee, unassigned) = if args.unassigned {
+        (None, true)
+    } else if let Some(assignee) = &args.assignee {
+        (Some(assignee.clone()), false)
+    } else {
+        (profile.assignee.clone(), profile.unassigned)
+    };
+
+    let (asc, desc) = if args.asc {
+        (true, false)
+    } else if args.desc {
+        (false, true)
+    } else {
+        (profile.asc, profile.desc)
+    };
+
+    SearchIntent::try_from(&SearchArgs {
+        json: args.json,
+        profile: None,
+        query: args.query.clone(),
+        jql: args.jql.clone().or_else(|| profile.jql.clone()),
+        board: args.board.clone().or_else(|| profile.board.clone()),
+        project: args.project.clone().or_else(|| profile.project.clone()),
+        assignee,
+        unassigned,
+        reporter: args.reporter.clone().or_else(|| profile.reporter.clone()),
+        status: merged_vec(&profile.status, &args.status),
+        status_category: args
+            .status_category
+            .clone()
+            .or_else(|| profile.status_category.clone()),
+        issue_type: merged_vec(&profile.issue_type, &args.issue_type),
+        component: merged_vec(&profile.component, &args.component),
+        label: merged_vec(&profile.label, &args.label),
+        text: args.text.clone().or_else(|| profile.text.clone()),
+        open: args.open || profile.open,
+        limit: args.limit.or(profile.limit),
+        next_page_token: args.next_page_token.clone(),
+        columns: args.columns.clone(),
+        debug_jql: args.debug_jql,
+        sort: args.sort.clone().or_else(|| profile.sort.clone()),
+        asc,
+        desc,
+    })
+}
+
+fn merged_vec(profile_values: &[String], cli_values: &[String]) -> Vec<String> {
+    profile_values
+        .iter()
+        .chain(cli_values.iter())
+        .cloned()
+        .collect()
+}
+
+fn serialize_human_columns(human_columns: &HumanColumns) -> Option<String> {
+    match human_columns {
+        HumanColumns::Default => None,
+        HumanColumns::Custom(columns) => Some(
+            columns
+                .iter()
+                .map(|column| match column {
+                    SearchColumn::Key => "key",
+                    SearchColumn::Status => "status",
+                    SearchColumn::Summary => "summary",
+                    SearchColumn::Components => "components",
+                    SearchColumn::Type => "type",
+                    SearchColumn::Assignee => "assignee",
+                    SearchColumn::Priority => "priority",
+                    SearchColumn::Updated => "updated",
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+    }
+}
+
+fn build_next_page_command(intent: &SearchIntent, continuation: &SearchContinuation) -> String {
+    let mut parts = vec!["jeera".to_string(), "search".to_string()];
+
+    if intent.json {
+        parts.push("--json".to_string());
+    }
+    if let Some(jql) = &intent.jql {
+        parts.push("--jql".to_string());
+        parts.push(shell_quote(jql));
+    }
+    if let Some(board) = &intent.board {
+        parts.push("--board".to_string());
+        parts.push(shell_quote(&board.to_cli_value()));
+    }
+    if let Some(project) = &intent.project {
+        parts.push("--project".to_string());
+        parts.push(shell_quote(project));
+    }
+    if let Some(assignee) = &intent.assignee {
+        parts.push("--assignee".to_string());
+        parts.push(shell_quote(assignee));
+    }
+    if intent.unassigned {
+        parts.push("--unassigned".to_string());
+    }
+    if let Some(reporter) = &intent.reporter {
+        parts.push("--reporter".to_string());
+        parts.push(shell_quote(reporter));
+    }
+    for status in &intent.status {
+        parts.push("--status".to_string());
+        parts.push(shell_quote(status));
+    }
+    if let Some(status_category) = &intent.status_category {
+        parts.push("--status-category".to_string());
+        parts.push(shell_quote(status_category));
+    }
+    for issue_type in &intent.issue_type {
+        parts.push("--type".to_string());
+        parts.push(shell_quote(issue_type));
+    }
+    for component in &intent.component {
+        parts.push("--component".to_string());
+        parts.push(shell_quote(component));
+    }
+    for label in &intent.label {
+        parts.push("--label".to_string());
+        parts.push(shell_quote(label));
+    }
+    if let Some(text) = &intent.text {
+        parts.push("--text".to_string());
+        parts.push(shell_quote(text));
+    }
+    if intent.open {
+        parts.push("--open".to_string());
+    }
+    parts.push("--limit".to_string());
+    parts.push(intent.limit.unwrap_or(DEFAULT_SEARCH_LIMIT).to_string());
+    if let Some(columns) = serialize_human_columns(&intent.human_columns) {
+        parts.push("--columns".to_string());
+        parts.push(shell_quote(&columns));
+    }
+    if let Some(sort) = &intent.sort {
+        parts.push("--sort".to_string());
+        parts.push(shell_quote(sort));
+    }
+    if intent.sort_direction == Some(SortDirection::Asc) {
+        parts.push("--asc".to_string());
+    }
+    if intent.sort_direction == Some(SortDirection::Desc) {
+        parts.push("--desc".to_string());
+    }
+    parts.push("--next-page-token".to_string());
+    parts.push(shell_quote(continuation.next_page_token()));
+    if let Some(query) = &intent.query {
+        parts.push(shell_quote(query));
+    }
+
+    parts.join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty() && value.bytes().all(|byte| {
+        matches!(
+            byte,
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'/' | b':' | b'@' | b'='
+        )
+    }) {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
+}
+
 fn render_key(key: &str) -> String {
     use crate::render::ansi::{BOLD, CYAN, RESET};
 
@@ -342,7 +710,7 @@ fn render_components(issue: &SearchIssueOutput) -> String {
 
 // Internal seam for tests: production uses JiraClient, tests use closure adapters.
 fn prepare_with_board_source<R, F>(
-    args: &SearchArgs,
+    intent: &SearchIntent,
     default_board_id: Option<u64>,
     resolve_board_name: R,
     load_board_filter: F,
@@ -351,29 +719,27 @@ where
     R: FnMut(&str) -> Result<u64, AppError>,
     F: FnOnce(u64) -> Result<BoardJqlFilter, AppError>,
 {
-    let human_columns = parse_human_columns(args.columns.as_deref())?;
-    validate_search_args(args)?;
+    validate_search_intent(intent)?;
 
     let configured_board_id =
-        resolve_board_id(args.board.as_deref(), default_board_id, resolve_board_name)?;
-    if configured_board_id.is_none() && !has_explicit_search_restriction(args) {
+        resolve_board_id(intent.board.as_ref(), default_board_id, resolve_board_name)?;
+    if configured_board_id.is_none() && !has_explicit_search_restriction(intent) {
         return Err(AppError::InvalidSearch {
             reason: "provide at least one search restriction, such as QUERY, --jql, --board, --project, --assignee, --component, --status, --label, --text, or configure default_board_id".to_string(),
         });
     }
 
     let board_filter = configured_board_id.map(load_board_filter).transpose()?;
-    let jql = query_from_search_args(args, board_filter).to_jql();
+    let jql = query_from_search_intent(intent, board_filter).to_jql();
 
     Ok(PreparedIssueSearch {
         request: SearchIssuesRequest {
             jql,
-            next_page_token: args.next_page_token.clone(),
-            max_results: Some(args.limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
-            fields: search_fields(args.json, &human_columns),
+            next_page_token: intent.next_page_token.clone(),
+            max_results: Some(intent.limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
+            fields: search_fields(intent.json, &intent.human_columns),
             ..Default::default()
         },
-        human_columns,
     })
 }
 
@@ -403,44 +769,50 @@ fn parse_human_columns(value: Option<&str>) -> Result<HumanColumns, AppError> {
     Ok(HumanColumns::Custom(unique))
 }
 
-fn has_explicit_search_restriction(args: &SearchArgs) -> bool {
-    args.query
+fn has_explicit_search_restriction(intent: &SearchIntent) -> bool {
+    intent
+        .query
         .as_deref()
         .is_some_and(|query| !query.trim().is_empty())
-        || args
+        || intent
             .jql
             .as_deref()
             .is_some_and(|jql| !jql.trim().is_empty())
-        || args.project.is_some()
-        || args.assignee.is_some()
-        || args.unassigned
-        || args.reporter.is_some()
-        || !args.status.is_empty()
-        || args.status_category.is_some()
-        || !args.issue_type.is_empty()
-        || !args.component.is_empty()
-        || !args.label.is_empty()
-        || args.text.is_some()
-        || args.open
+        || intent.project.is_some()
+        || intent.assignee.is_some()
+        || intent.unassigned
+        || intent.reporter.is_some()
+        || !intent.status.is_empty()
+        || intent.status_category.is_some()
+        || !intent.issue_type.is_empty()
+        || !intent.component.is_empty()
+        || !intent.label.is_empty()
+        || intent.text.is_some()
+        || intent.open
 }
 
-fn validate_search_args(args: &SearchArgs) -> Result<(), AppError> {
-    validate_limit(args.limit.unwrap_or(DEFAULT_SEARCH_LIMIT))?;
-    validate_optional_value("query", args.query.as_deref())?;
-    validate_optional_value("jql", args.jql.as_deref())?;
-    validate_optional_value("board", args.board.as_deref())?;
-    validate_optional_value("project", args.project.as_deref())?;
-    validate_optional_value("assignee", args.assignee.as_deref())?;
-    validate_optional_value("reporter", args.reporter.as_deref())?;
-    validate_optional_value("status-category", args.status_category.as_deref())?;
-    validate_optional_value("text", args.text.as_deref())?;
-    validate_optional_value("next-page-token", args.next_page_token.as_deref())?;
-    validate_optional_value("columns", args.columns.as_deref())?;
-    validate_repeated_values("status", &args.status)?;
-    validate_repeated_values("type", &args.issue_type)?;
-    validate_repeated_values("component", &args.component)?;
-    validate_repeated_values("label", &args.label)?;
-    if let Some(sort) = args.sort.as_deref() {
+fn validate_search_intent(intent: &SearchIntent) -> Result<(), AppError> {
+    validate_limit(intent.limit.unwrap_or(DEFAULT_SEARCH_LIMIT))?;
+    validate_optional_value("query", intent.query.as_deref())?;
+    validate_optional_value("jql", intent.jql.as_deref())?;
+    validate_optional_value(
+        "board",
+        intent.board.as_ref().map(|board| match board {
+            BoardSelector::Id(_) => "id",
+            BoardSelector::Name(board_name) => board_name.as_str(),
+        }),
+    )?;
+    validate_optional_value("project", intent.project.as_deref())?;
+    validate_optional_value("assignee", intent.assignee.as_deref())?;
+    validate_optional_value("reporter", intent.reporter.as_deref())?;
+    validate_optional_value("status-category", intent.status_category.as_deref())?;
+    validate_optional_value("text", intent.text.as_deref())?;
+    validate_optional_value("next-page-token", intent.next_page_token.as_deref())?;
+    validate_repeated_values("status", &intent.status)?;
+    validate_repeated_values("type", &intent.issue_type)?;
+    validate_repeated_values("component", &intent.component)?;
+    validate_repeated_values("label", &intent.label)?;
+    if let Some(sort) = intent.sort.as_deref() {
         validate_sort_field(sort)?;
     }
     Ok(())
@@ -494,18 +866,16 @@ fn validate_sort_field(sort: &str) -> Result<(), AppError> {
 }
 
 fn resolve_board_id<R>(
-    board: Option<&str>,
+    board: Option<&BoardSelector>,
     default_board_id: Option<u64>,
     mut resolve_board_name: R,
 ) -> Result<Option<u64>, AppError>
 where
     R: FnMut(&str) -> Result<u64, AppError>,
 {
-    match board.map(str::trim) {
-        Some(board) => match parse_board_selector(board)? {
-            BoardSelector::Id(board_id) => Ok(Some(board_id)),
-            BoardSelector::Name(board_name) => resolve_board_name(&board_name).map(Some),
-        },
+    match board {
+        Some(BoardSelector::Id(board_id)) => Ok(Some(*board_id)),
+        Some(BoardSelector::Name(board_name)) => resolve_board_name(board_name).map(Some),
         None => Ok(default_board_id),
     }
 }
@@ -587,9 +957,9 @@ fn parse_board_filter_id(board_id: u64, filter_id: &str) -> Result<u64, AppError
 }
 
 // Translates CLI-shaped search intent into generic JQL clauses.
-fn query_from_search_args(args: &SearchArgs, board_filter: Option<BoardJqlFilter>) -> Query {
+fn query_from_search_intent(intent: &SearchIntent, board_filter: Option<BoardJqlFilter>) -> Query {
     let board_scoped = board_filter.is_some();
-    let (raw_clause, raw_order_by) = args
+    let (raw_clause, raw_order_by) = intent
         .jql
         .as_deref()
         .map(jql::split_order_by)
@@ -614,72 +984,72 @@ fn query_from_search_args(args: &SearchArgs, board_filter: Option<BoardJqlFilter
         }
     }
 
-    if let Some(project) = &args.project {
+    if let Some(project) = &intent.project {
         query.push(Clause::field_equals("project", Value::text(project)));
     }
 
-    if args.unassigned {
+    if intent.unassigned {
         query.push(Clause::is_empty("assignee"));
-    } else if let Some(assignee) = &args.assignee {
+    } else if let Some(assignee) = &intent.assignee {
         query.push(Clause::field_equals(
             "assignee",
             UserRef::parse(assignee).to_value(),
         ));
     }
 
-    if let Some(reporter) = &args.reporter {
+    if let Some(reporter) = &intent.reporter {
         query.push(Clause::field_equals(
             "reporter",
             UserRef::parse(reporter).to_value(),
         ));
     }
 
-    if !args.status.is_empty() {
-        query.push(Clause::field_in("status", args.status.clone()));
+    if !intent.status.is_empty() {
+        query.push(Clause::field_in("status", intent.status.clone()));
     }
 
-    if let Some(status_category) = &args.status_category {
+    if let Some(status_category) = &intent.status_category {
         query.push(Clause::field_equals(
             "statusCategory",
             Value::text(status_category),
         ));
     }
 
-    if !args.issue_type.is_empty() {
-        query.push(Clause::field_in("issuetype", args.issue_type.clone()));
+    if !intent.issue_type.is_empty() {
+        query.push(Clause::field_in("issuetype", intent.issue_type.clone()));
     }
 
-    if !args.component.is_empty() {
-        query.push(Clause::field_in("component", args.component.clone()));
+    if !intent.component.is_empty() {
+        query.push(Clause::field_in("component", intent.component.clone()));
     }
 
-    if !args.label.is_empty() {
-        query.push(Clause::field_in("labels", args.label.clone()));
+    if !intent.label.is_empty() {
+        query.push(Clause::field_in("labels", intent.label.clone()));
     }
 
-    if let Some(query_text) = &args.query {
+    if let Some(query_text) = &intent.query {
         query.push(Clause::field_matches("text", query_text));
     }
 
-    if let Some(text) = &args.text {
+    if let Some(text) = &intent.text {
         query.push(Clause::field_matches("text", text));
     }
 
-    if args.open {
+    if intent.open {
         query.push(Clause::raw("statusCategory != Done"));
     }
 
     let order_by = raw_order_by
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map_or_else(|| default_order(args, board_scoped), Order::raw);
+        .map_or_else(|| default_order(intent, board_scoped), Order::raw);
 
     query.order_by(order_by);
     query
 }
 
-fn default_order(args: &SearchArgs, board_scoped: bool) -> Order {
-    let field = args
+fn default_order(intent: &SearchIntent, board_scoped: bool) -> Order {
+    let field = intent
         .sort
         .as_deref()
         .map(canonical_sort_field)
@@ -691,9 +1061,9 @@ fn default_order(args: &SearchArgs, board_scoped: bool) -> Order {
             }
         });
 
-    let direction = if args.asc {
+    let direction = if intent.sort_direction == Some(SortDirection::Asc) {
         SortDirection::Asc
-    } else if args.desc {
+    } else if intent.sort_direction == Some(SortDirection::Desc) {
         SortDirection::Desc
     } else if field.eq_ignore_ascii_case("Rank") {
         SortDirection::Asc
@@ -786,16 +1156,78 @@ impl SearchIssueOutput {
 mod tests {
     use super::*;
     use crate::client::types::SearchIssuesResponse;
+    use crate::client::{JiraAuth, JiraClient, JiraClientConfig};
+    use crate::config::SearchProfileSettings;
     use crate::render;
+    use std::collections::BTreeMap;
     use std::fs;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
+    use url::Url;
 
     fn fixture(path: &str) -> String {
         fs::read_to_string(Path::new("tests/fixtures/jira").join(path)).unwrap()
     }
 
+    fn spawn_server(status_line: &str, body: &str) -> (Url, std::sync::mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let response = format!(
+            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+
+            let mut buffer = [0_u8; 8192];
+            let bytes_read = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes_read]).into_owned();
+            tx.send(request).unwrap();
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+
+        (Url::parse(&format!("http://{addr}/")).unwrap(), rx)
+    }
+
+    fn prepare_with_board_source<R, F>(
+        args: &SearchArgs,
+        default_board_id: Option<u64>,
+        resolve_board_name: R,
+        load_board_filter: F,
+    ) -> Result<PreparedIssueSearch, AppError>
+    where
+        R: FnMut(&str) -> Result<u64, AppError>,
+        F: FnOnce(u64) -> Result<BoardJqlFilter, AppError>,
+    {
+        super::prepare_with_board_source(
+            &SearchIntent::try_from(args)?,
+            default_board_id,
+            resolve_board_name,
+            load_board_filter,
+        )
+    }
+
     fn prepare_without_board(args: &SearchArgs) -> PreparedIssueSearch {
         prepare_with_board_source(args, None, |_| unreachable!(), |_| unreachable!()).unwrap()
+    }
+
+    fn render_human(
+        writer: impl Write,
+        output: &SearchOutput,
+        columns: &[SearchColumn],
+        next_page_command: Option<&str>,
+    ) -> Result<(), AppError> {
+        super::render_human_output(writer, output, columns, next_page_command)
     }
 
     #[test]
@@ -1612,6 +2044,58 @@ mod tests {
         assert_eq!(
             String::from_utf8(rendered).unwrap(),
             "No issues found.\nNext page token: abc\nNext page command: jeera search --next-page-token abc\n"
+        );
+    }
+
+    #[test]
+    fn execute_exposes_effective_intent_and_expands_continuation_from_it() {
+        let body = r#"{"isLast":false,"nextPageToken":"next token","issues":[]}"#;
+        let (base_url, rx) = spawn_server("200 OK", body);
+        let mut searches = BTreeMap::new();
+        searches.insert(
+            "qqms".to_string(),
+            SearchProfileSettings {
+                project: Some("SAMPLE".to_string()),
+                component: vec!["QQMS".to_string()],
+                limit: Some(25),
+                ..Default::default()
+            },
+        );
+        let client = JiraClient::new(JiraClientConfig {
+            base_url,
+            auth: JiraAuth::Basic {
+                email: "user@example.com".to_string(),
+                api_token: "token".to_string(),
+            },
+            timeout: Duration::from_secs(5),
+            default_board_id: None,
+            searches,
+        });
+        let intent = SearchIntent::try_from(&SearchArgs {
+            profile: Some("qqms".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let execution = execute(&client, intent).unwrap();
+
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            execution.effective_intent().project.as_deref(),
+            Some("SAMPLE")
+        );
+        assert_eq!(execution.effective_intent().component, vec!["QQMS"]);
+        assert_eq!(execution.effective_intent().limit, Some(25));
+        assert_eq!(
+            execution.continuation().unwrap().next_page_token(),
+            "next token"
+        );
+
+        let mut rendered = Vec::new();
+        super::render_human(&mut rendered, &execution).unwrap();
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            "No issues found.\nNext page token: next token\nNext page command: jeera search --project SAMPLE --component QQMS --limit 25 --next-page-token 'next token'\n"
         );
     }
 

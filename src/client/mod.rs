@@ -1,9 +1,10 @@
 use crate::client::types::{
-    GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetCreateMetaRequest,
-    GetCreateMetaResponse, GetEditMetaRequest, GetEditMetaResponse, GetIssueRequest,
-    GetIssueResponse, GetTransitionsRequest, GetTransitionsResponse, JiraError, JiraErrorResponse,
-    ListBoardIssuesRequest, ListBoardIssuesResponse, ListBoardsRequest, ListBoardsResponse,
-    SearchIssuesRequest, SearchIssuesResponse,
+    CreateIssueRequest, CreateIssueResponse, GetBoardConfigurationRequest,
+    GetBoardConfigurationResponse, GetCreateMetaRequest, GetCreateMetaResponse, GetEditMetaRequest,
+    GetEditMetaResponse, GetIssueRequest, GetIssueResponse, GetTransitionsRequest,
+    GetTransitionsResponse, JiraError, JiraErrorResponse, ListBoardIssuesRequest,
+    ListBoardIssuesResponse, ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest,
+    SearchIssuesResponse,
 };
 use crate::config::SearchProfileSettings;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -44,6 +45,13 @@ impl JiraClient {
             config,
             http: http_config.into(),
         }
+    }
+
+    pub fn create_issue(
+        &self,
+        request: &CreateIssueRequest,
+    ) -> Result<CreateIssueResponse, JiraError> {
+        self.send_json(ureq::http::Method::POST, "rest/api/3/issue", Some(request))
     }
 
     pub fn get_issue<F>(&self, request: &GetIssueRequest) -> Result<GetIssueResponse<F>, JiraError>
@@ -478,6 +486,40 @@ mod tests {
         );
 
         assert_eq!(client.authorization_header(), "Bearer secret-token");
+    }
+
+    #[test]
+    fn create_issue_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "201 Created",
+            r#"{"id":"10001","key":"DEMO-101","self":"https://example.atlassian.net/rest/api/3/issue/10001"}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = CreateIssueRequest {
+            fields: BTreeMap::from([
+                ("project".to_string(), serde_json::json!({"key":"DEMO"})),
+                ("issuetype".to_string(), serde_json::json!({"name":"Task"})),
+                ("summary".to_string(), serde_json::json!("Create something")),
+            ]),
+        };
+
+        let response = client.create_issue(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let body: Value = serde_json::from_str(&captured.body).unwrap();
+        let headers = captured.headers.to_ascii_lowercase();
+
+        assert_eq!(captured.method, "POST");
+        assert_eq!(captured.path, "/rest/api/3/issue");
+        assert!(headers.contains("content-type: application/json"));
+        assert_eq!(body["fields"]["project"]["key"], "DEMO");
+        assert_eq!(body["fields"]["issuetype"]["name"], "Task");
+        assert_eq!(body["fields"]["summary"], "Create something");
+        assert_eq!(response.key, "DEMO-101");
     }
 
     #[test]

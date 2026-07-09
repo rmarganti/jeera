@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod error;
 mod issue_boards;
+mod issue_create;
 mod issue_metadata;
 mod issue_search;
 mod issue_show;

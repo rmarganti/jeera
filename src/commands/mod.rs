@@ -3,6 +3,7 @@ use crate::client::JiraClient;
 use crate::error::AppError;
 
 pub mod boards;
+pub mod create;
 pub mod metadata;
 pub mod search;
 pub mod show;
@@ -12,6 +13,7 @@ pub fn run(client: &JiraClient, command: Command) -> Result<(), AppError> {
         Command::Boards(args) => boards::run(client, &args),
         Command::Search(args) => search::run(client, &args),
         Command::Show(args) => show::run(client, &args),
+        Command::Create(args) => create::run(client, &args),
         Command::ShowCreateMeta(args) => metadata::show_create_meta(client, &args),
         Command::ShowEditMeta(args) => metadata::show_edit_meta(client, &args),
         Command::ShowTransitions(args) => metadata::show_transitions(client, &args),

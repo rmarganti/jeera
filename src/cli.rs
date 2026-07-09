@@ -12,6 +12,7 @@ pub enum Command {
     Boards(BoardsArgs),
     Search(Box<SearchArgs>),
     Show(ShowArgs),
+    Create(CreateArgs),
     ShowCreateMeta(ShowCreateMetaArgs),
     ShowEditMeta(ShowEditMetaArgs),
     ShowTransitions(ShowTransitionsArgs),
@@ -126,6 +127,42 @@ pub struct ShowArgs {
 
     #[arg(long)]
     pub comments: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct CreateArgs {
+    #[arg(long, conflicts_with = "board")]
+    pub project: Option<String>,
+
+    #[arg(long, value_name = "ID|NAME", help = "Board id or exact board name")]
+    pub board: Option<String>,
+
+    #[arg(long = "type", alias = "issue-type")]
+    pub issue_type: String,
+
+    #[arg(long)]
+    pub summary: String,
+
+    #[arg(long, conflicts_with = "body_file")]
+    pub body: Option<String>,
+
+    #[arg(long, value_name = "PATH|-", conflicts_with = "body")]
+    pub body_file: Option<String>,
+
+    #[arg(long)]
+    pub component: Vec<String>,
+
+    #[arg(long)]
+    pub label: Vec<String>,
+
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub field: Vec<String>,
+
+    #[arg(long)]
+    pub dry_run: bool,
+
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args, Default)]
@@ -254,6 +291,43 @@ mod tests {
                 assert_eq!(args.query.as_deref(), Some("demo"));
             }
             other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_accepts_cli_fields() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "create",
+            "--project",
+            "GCCDEV",
+            "--type",
+            "Task",
+            "--summary",
+            "Add homes intake validation",
+            "--body-file",
+            "body.md",
+            "--component",
+            "Homes",
+            "--label",
+            "homes-2",
+            "--field",
+            "customfield_12345=demo",
+            "--dry-run",
+        ]);
+
+        match cli.command {
+            Command::Create(args) => {
+                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.issue_type, "Task");
+                assert_eq!(args.summary, "Add homes intake validation");
+                assert_eq!(args.body_file.as_deref(), Some("body.md"));
+                assert_eq!(args.component, vec!["Homes"]);
+                assert_eq!(args.label, vec!["homes-2"]);
+                assert_eq!(args.field, vec!["customfield_12345=demo"]);
+                assert!(args.dry_run);
+            }
+            other => panic!("expected create command, got {other:?}"),
         }
     }
 

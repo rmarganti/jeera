@@ -1,6 +1,6 @@
 # jeera
 
-Read-mostly Jira CLI for listing boards, searching issues, viewing issue details, and inspecting metadata needed for future write operations.
+Jira CLI for listing boards, searching issues, viewing issue details, inspecting metadata, and creating issues.
 
 ## Configuration
 
@@ -42,7 +42,7 @@ Read-mostly Jira CLI for listing boards, searching issues, viewing issue details
 - `base_url`: absolute `http` or `https` Jira base URL
 - `auth`: `basic` or `bearer`
 - `http_timeout_seconds`: optional, defaults to `30`
-- `default_board_id`: optional board id used by `jeera search` when `--board` is omitted
+- `default_board_id`: optional board id used by commands such as `jeera search`, `jeera show-create-meta`, and `jeera create` when `--board`/`--project` is omitted
 - `searches`: optional map of saved search profiles for `jeera search --profile <NAME>`
 
 ### Saved search profiles
@@ -175,6 +175,38 @@ jeera show GCCDEV-123 --comments --json
 ```
 
 Human output includes summary, status, type, priority, assignee, reporter, created/updated timestamps, components, description, and optional comments.
+
+### `jeera create`
+
+Create a Jira issue. Creation is CLI-first: use flags for fields, and use `--body-file` only when the description/body is long.
+
+```sh
+jeera create --project GCCDEV --type Task --summary "Add homes intake validation" [OPTIONS]
+jeera create --board 215 --type Spike --summary "Discover source" --body-file ./body.md
+```
+
+Options:
+
+- `--project <KEY>` Jira project key; conflicts with `--board`
+- `--board <ID|NAME>` derive the project from a board; falls back to `default_board_id` when both `--project` and `--board` are omitted
+- `--type <TYPE>` / `--issue-type <TYPE>` issue type name
+- `--summary <TEXT>` issue summary
+- `--body <TEXT>` issue description/body text
+- `--body-file <PATH|->` read issue description/body text from a file or stdin
+- `--component <COMPONENT>` repeatable
+- `--label <LABEL>` repeatable
+- `--field <KEY=VALUE>` repeatable string-valued field escape hatch for required Jira fields that do not yet have dedicated flags
+- `--dry-run` validate and print what would be created without creating the issue
+- `--json`
+
+Before creating, jeera loads Jira create metadata for the resolved project and issue type, then rejects missing required create fields with a clear error.
+
+Examples:
+
+```sh
+jeera create --project GCCDEV --type Task --summary "Add homes intake validation" --body-file ./ticket-body.md --component Homes --label homes-2 --dry-run
+jeera create --board 'GCCDEV Kanban Board' --type Spike --summary "Discover canonical market source" --body "Identify the canonical source."
+```
 
 ### `jeera show-create-meta`
 

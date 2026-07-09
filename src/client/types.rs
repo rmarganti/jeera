@@ -118,6 +118,20 @@ pub enum JiraError {
 // Get Issue
 // ----------------------------------------------------------------
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateIssueRequest {
+    pub fields: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateIssueResponse {
+    pub id: String,
+    pub key: String,
+    #[serde(rename = "self")]
+    pub self_link: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GetIssueRequest {
     pub issue_id_or_key: String,

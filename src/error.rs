@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("invalid metadata request: {reason}")]
     InvalidMetadata { reason: String },
 
+    #[error("invalid create request: {reason}")]
+    InvalidCreate { reason: String },
+
     #[error("while preparing board {board_id} for search: {source}")]
     PrepareBoardSearch { board_id: u64, source: JiraError },
 
@@ -42,6 +45,12 @@ pub enum AppError {
 
     #[error("while executing metadata request: {source}")]
     ExecuteMetadata { source: JiraError },
+
+    #[error("while executing create: {source}")]
+    ExecuteCreate { source: JiraError },
+
+    #[error("while reading input: {source}")]
+    ReadInput { source: std::io::Error },
 
     #[error("while writing output: {source}")]
     RenderOutput { source: std::io::Error },

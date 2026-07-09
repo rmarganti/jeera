@@ -12,6 +12,9 @@ pub enum Command {
     Boards(BoardsArgs),
     Search(Box<SearchArgs>),
     Show(ShowArgs),
+    ShowCreateMeta(ShowCreateMetaArgs),
+    ShowEditMeta(ShowEditMetaArgs),
+    ShowTransitions(ShowTransitionsArgs),
 }
 
 #[derive(Debug, Args, Default)]
@@ -125,6 +128,37 @@ pub struct ShowArgs {
     pub comments: bool,
 }
 
+#[derive(Debug, Args, Default)]
+pub struct ShowCreateMetaArgs {
+    #[arg(long, conflicts_with = "board")]
+    pub project: Option<String>,
+
+    #[arg(long, value_name = "ID|NAME", help = "Board id or exact board name")]
+    pub board: Option<String>,
+
+    #[arg(long = "type", alias = "issue-type")]
+    pub issue_type: Option<String>,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct ShowEditMetaArgs {
+    pub issue_key: String,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct ShowTransitionsArgs {
+    pub issue_key: String,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +254,55 @@ mod tests {
                 assert_eq!(args.query.as_deref(), Some("demo"));
             }
             other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn metadata_commands_use_show_names() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "show-create-meta",
+            "--project",
+            "GCCDEV",
+            "--type",
+            "Task",
+        ]);
+        match cli.command {
+            Command::ShowCreateMeta(args) => {
+                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.issue_type.as_deref(), Some("Task"));
+            }
+            other => panic!("expected show-create-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-create-meta", "--board", "GCCDEV Board"]);
+        match cli.command {
+            Command::ShowCreateMeta(args) => {
+                assert_eq!(args.project, None);
+                assert_eq!(args.board.as_deref(), Some("GCCDEV Board"));
+            }
+            other => panic!("expected show-create-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-create-meta"]);
+        match cli.command {
+            Command::ShowCreateMeta(args) => {
+                assert_eq!(args.project, None);
+                assert_eq!(args.board, None);
+            }
+            other => panic!("expected show-create-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-6902"]);
+        match cli.command {
+            Command::ShowEditMeta(args) => assert_eq!(args.issue_key, "GCCDEV-6902"),
+            other => panic!("expected show-edit-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-transitions", "GCCDEV-6902"]);
+        match cli.command {
+            Command::ShowTransitions(args) => assert_eq!(args.issue_key, "GCCDEV-6902"),
+            other => panic!("expected show-transitions command, got {other:?}"),
         }
     }
 }

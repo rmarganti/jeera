@@ -1,6 +1,8 @@
+use crate::board;
+pub(super) use crate::board::BoardSelector;
 use crate::client::{
     JiraClient,
-    types::{BoardResponse, GetBoardConfigurationRequest, ListBoardsRequest},
+    types::{GetBoardConfigurationRequest, ListBoardsRequest},
 };
 use crate::error::AppError;
 
@@ -9,21 +11,6 @@ use crate::error::AppError;
 pub(crate) struct BoardJqlFilter {
     pub(crate) filter_id: u64,
     pub(crate) sub_query: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BoardSelector {
-    Id(u64),
-    Name(String),
-}
-
-impl BoardSelector {
-    pub(super) fn to_cli_value(&self) -> String {
-        match self {
-            Self::Id(board_id) => board_id.to_string(),
-            Self::Name(board_name) => board_name.clone(),
-        }
-    }
 }
 
 pub(super) fn resolve_board_id<R>(
@@ -41,17 +28,8 @@ where
     }
 }
 
-pub(super) fn parse_board_selector(board: &str) -> Result<BoardSelector, AppError> {
-    if board.is_empty() {
-        return Err(AppError::InvalidSearch {
-            reason: "--board cannot be empty".to_string(),
-        });
-    }
-
-    match board.parse::<u64>() {
-        Ok(board_id) => Ok(BoardSelector::Id(board_id)),
-        Err(_) => Ok(BoardSelector::Name(board.to_string())),
-    }
+pub(super) fn parse_board_selector(value: &str) -> Result<BoardSelector, AppError> {
+    board::parse_board_selector(value, "board").map_err(|reason| AppError::InvalidSearch { reason })
 }
 
 pub(super) fn resolve_board_name(client: &JiraClient, board_name: &str) -> Result<u64, AppError> {
@@ -59,44 +37,8 @@ pub(super) fn resolve_board_name(client: &JiraClient, board_name: &str) -> Resul
         .list_boards(&ListBoardsRequest::default())
         .map_err(|source| AppError::ExecuteBoards { source })?;
 
-    find_board_id_by_name(&response.values, board_name)
-}
-
-pub(crate) fn find_board_id_by_name(
-    boards: &[BoardResponse],
-    board_name: &str,
-) -> Result<u64, AppError> {
-    let exact_matches = boards
-        .iter()
-        .filter(|board| board.name == board_name)
-        .collect::<Vec<_>>();
-    let matches = if exact_matches.is_empty() {
-        boards
-            .iter()
-            .filter(|board| board.name.eq_ignore_ascii_case(board_name))
-            .collect::<Vec<_>>()
-    } else {
-        exact_matches
-    };
-
-    match matches.as_slice() {
-        [] => Err(AppError::InvalidSearch {
-            reason: format!(
-                "no Jira board named {board_name:?} found; try `jeera boards` to discover available boards or pass a numeric --board ID"
-            ),
-        }),
-        [board] => Ok(board.id),
-        boards => Err(AppError::InvalidSearch {
-            reason: format!(
-                "board name {board_name:?} is ambiguous; matching board ids: {}. Try `jeera boards` or pass a numeric --board ID",
-                boards
-                    .iter()
-                    .map(|board| board.id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        }),
-    }
+    board::find_board_id_by_name(&response.values, board_name)
+        .map_err(|reason| AppError::InvalidSearch { reason })
 }
 
 pub(super) fn board_filter(client: &JiraClient, board_id: u64) -> Result<BoardJqlFilter, AppError> {
@@ -181,7 +123,7 @@ mod tests {
         let boards = vec![board_response(215, "SAMPLE Kanban Board", "kanban")];
 
         assert_eq!(
-            find_board_id_by_name(&boards, "sample kanban board").unwrap(),
+            board::find_board_id_by_name(&boards, "sample kanban board").unwrap(),
             215
         );
     }
@@ -190,11 +132,11 @@ mod tests {
     fn unknown_board_name_is_reported_clearly() {
         let boards = vec![board_response(215, "SAMPLE Kanban Board", "kanban")];
 
-        let error = find_board_id_by_name(&boards, "Missing Board").unwrap_err();
+        let error = board::find_board_id_by_name(&boards, "Missing Board").unwrap_err();
 
         assert_eq!(
-            error.to_string(),
-            "invalid search: no Jira board named \"Missing Board\" found; try `jeera boards` to discover available boards or pass a numeric --board ID"
+            error,
+            "no Jira board named \"Missing Board\" found; try `jeera boards` to discover available boards or pass a numeric --board ID"
         );
     }
 
@@ -205,11 +147,11 @@ mod tests {
             board_response(314, "Team Board", "scrum"),
         ];
 
-        let error = find_board_id_by_name(&boards, "Team Board").unwrap_err();
+        let error = board::find_board_id_by_name(&boards, "Team Board").unwrap_err();
 
         assert_eq!(
-            error.to_string(),
-            "invalid search: board name \"Team Board\" is ambiguous; matching board ids: 215, 314. Try `jeera boards` or pass a numeric --board ID"
+            error,
+            "board name \"Team Board\" is ambiguous; matching board ids: 215, 314. Try `jeera boards` or pass a numeric --board ID"
         );
     }
 

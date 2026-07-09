@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("invalid search: {reason}")]
     InvalidSearch { reason: String },
 
+    #[error("invalid metadata request: {reason}")]
+    InvalidMetadata { reason: String },
+
     #[error("while preparing board {board_id} for search: {source}")]
     PrepareBoardSearch { board_id: u64, source: JiraError },
 
@@ -36,6 +39,9 @@ pub enum AppError {
 
     #[error("while executing show: {source}")]
     ExecuteShow { source: JiraError },
+
+    #[error("while executing metadata request: {source}")]
+    ExecuteMetadata { source: JiraError },
 
     #[error("while writing output: {source}")]
     RenderOutput { source: std::io::Error },

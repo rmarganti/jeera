@@ -1,6 +1,6 @@
 # jeera
 
-Read-only Jira CLI for listing boards, searching issues, and viewing issue details.
+Read-mostly Jira CLI for listing boards, searching issues, viewing issue details, and inspecting metadata needed for future write operations.
 
 ## Configuration
 
@@ -175,3 +175,28 @@ jeera show GCCDEV-123 --comments --json
 ```
 
 Human output includes summary, status, type, priority, assignee, reporter, created/updated timestamps, components, description, and optional comments.
+
+### `jeera show-create-meta`
+
+Show Jira create metadata, including available issue types and required fields. If `--project` is omitted, jeera can derive the project from `--board` or the configured `default_board_id`.
+
+```sh
+jeera show-create-meta [--project GCCDEV | --board 215] [--type Task] [--json]
+jeera show-create-meta
+```
+
+### `jeera show-edit-meta`
+
+Show editable fields for an existing issue.
+
+```sh
+jeera show-edit-meta GCCDEV-123 [--json]
+```
+
+### `jeera show-transitions`
+
+Show available workflow transitions for an existing issue.
+
+```sh
+jeera show-transitions GCCDEV-123 [--json]
+```

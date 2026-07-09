@@ -1,7 +1,9 @@
 use crate::client::types::{
-    GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetIssueRequest, GetIssueResponse,
-    JiraError, JiraErrorResponse, ListBoardIssuesRequest, ListBoardIssuesResponse,
-    ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest, SearchIssuesResponse,
+    GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetCreateMetaRequest,
+    GetCreateMetaResponse, GetEditMetaRequest, GetEditMetaResponse, GetIssueRequest,
+    GetIssueResponse, GetTransitionsRequest, GetTransitionsResponse, JiraError, JiraErrorResponse,
+    ListBoardIssuesRequest, ListBoardIssuesResponse, ListBoardsRequest, ListBoardsResponse,
+    SearchIssuesRequest, SearchIssuesResponse,
 };
 use crate::config::SearchProfileSettings;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -148,6 +150,44 @@ impl JiraClient {
             "rest/api/3/search/jql",
             Some(request),
         )
+    }
+
+    pub fn get_create_meta(
+        &self,
+        request: &GetCreateMetaRequest,
+    ) -> Result<GetCreateMetaResponse, JiraError> {
+        let mut path = "rest/api/3/issue/createmeta".to_string();
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+
+        query.append_pair("projectKeys", &request.project_key);
+        if let Some(issue_type_name) = &request.issue_type_name {
+            query.append_pair("issuetypeNames", issue_type_name);
+        }
+        query.append_pair("expand", "projects.issuetypes.fields");
+
+        let query = query.finish();
+        path.push('?');
+        path.push_str(&query);
+
+        self.send_json::<(), GetCreateMetaResponse>(ureq::http::Method::GET, &path, None)
+    }
+
+    pub fn get_edit_meta(
+        &self,
+        request: &GetEditMetaRequest,
+    ) -> Result<GetEditMetaResponse, JiraError> {
+        let path = format!("rest/api/3/issue/{}/editmeta", request.issue_id_or_key);
+
+        self.send_json::<(), GetEditMetaResponse>(ureq::http::Method::GET, &path, None)
+    }
+
+    pub fn get_transitions(
+        &self,
+        request: &GetTransitionsRequest,
+    ) -> Result<GetTransitionsResponse, JiraError> {
+        let path = format!("rest/api/3/issue/{}/transitions", request.issue_id_or_key);
+
+        self.send_json::<(), GetTransitionsResponse>(ureq::http::Method::GET, &path, None)
     }
 
     pub fn get_board_configuration(
@@ -569,6 +609,87 @@ mod tests {
         assert!(captured.body.is_empty());
         assert_eq!(response.filter.id, "10492");
         assert_eq!(response.sub_query.query, "fixVersion is EMPTY");
+    }
+
+    #[test]
+    fn get_create_meta_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"projects":[{"id":"10000","key":"DEMO","name":"Demo","issuetypes":[{"id":"10136","name":"Task","fields":{}}]}]}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetCreateMetaRequest {
+            project_key: "DEMO".to_string(),
+            issue_type_name: Some("Task".to_string()),
+        };
+
+        let response = client.get_create_meta(&request).unwrap();
+        let captured = rx.recv().unwrap();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(
+            captured.path,
+            "/rest/api/3/issue/createmeta?projectKeys=DEMO&issuetypeNames=Task&expand=projects.issuetypes.fields"
+        );
+        assert!(captured.body.is_empty());
+        assert_eq!(response.projects[0].key, "DEMO");
+        assert_eq!(response.projects[0].issuetypes[0].name, "Task");
+    }
+
+    #[test]
+    fn get_edit_meta_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"fields":{"summary":{"required":true,"name":"Summary","key":"summary","operations":["set"],"schema":{"type":"string"}}}}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetEditMetaRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+        };
+
+        let response = client.get_edit_meta(&request).unwrap();
+        let captured = rx.recv().unwrap();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(captured.path, "/rest/api/3/issue/DEMO-101/editmeta");
+        assert!(captured.body.is_empty());
+        assert_eq!(response.fields["summary"].name, "Summary");
+    }
+
+    #[test]
+    fn get_transitions_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"transitions":[{"id":"61","name":"Start Progress","to":{"id":"3","name":"In Progress","statusCategory":{"key":"indeterminate","name":"In Progress"}},"hasScreen":false,"isAvailable":true}]}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetTransitionsRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+        };
+
+        let response = client.get_transitions(&request).unwrap();
+        let captured = rx.recv().unwrap();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(captured.path, "/rest/api/3/issue/DEMO-101/transitions");
+        assert!(captured.body.is_empty());
+        assert_eq!(response.transitions[0].name, "Start Progress");
+        assert_eq!(response.transitions[0].to.name, "In Progress");
     }
 
     #[test]

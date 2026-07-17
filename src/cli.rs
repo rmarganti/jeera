@@ -1,7 +1,14 @@
-use clap::{Args, Parser, Subcommand};
+use std::ffi::OsString;
+
+use clap::{Args, Parser, Subcommand, error::ErrorKind};
 
 #[derive(Debug, Parser)]
-#[command(name = "jeera")]
+#[command(
+    name = "jeera",
+    about = "Read-only Jira CLI for finding and viewing issues",
+    long_about = "List Jira boards, search issues, and view issue details. Commands are task-oriented: use `search` to find issues and `show` to view one issue.",
+    after_help = "Examples:\n  jeera boards\n  jeera search --assignee me --open\n  jeera show GCCDEV-123"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -12,6 +19,32 @@ pub enum Command {
     Boards(BoardsArgs),
     Search(Box<SearchArgs>),
     Show(ShowArgs),
+}
+
+impl Cli {
+    pub fn parse_with_guidance() -> Self {
+        Self::try_parse_with_guidance_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+    }
+
+    fn try_parse_with_guidance_from<I, T>(args: I) -> clap::error::Result<Self>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+
+        if matches!(
+            args.get(1).and_then(|arg| arg.to_str()),
+            Some("issue" | "issues")
+        ) {
+            return Err(clap::Error::raw(
+                ErrorKind::InvalidSubcommand,
+                "`issue` is not a command\n\nTo search issues:\n  jeera search --help\n\nTo view an issue:\n  jeera show <ISSUE_KEY>\n\nRun `jeera --help` for all commands.",
+            ));
+        }
+
+        Self::try_parse_from(args)
+    }
 }
 
 #[derive(Debug, Args, Default)]
@@ -129,6 +162,33 @@ pub struct ShowArgs {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn issue_namespace_error_explains_the_cli_shape() {
+        for command in [
+            vec!["jeera", "issue", "--help"],
+            vec!["jeera", "issues", "--help"],
+            vec!["jeera", "issue", "show", "DEMO-101"],
+        ] {
+            let error = Cli::try_parse_with_guidance_from(command).unwrap_err();
+            let rendered = error.to_string();
+
+            assert!(rendered.contains("`issue` is not a command"));
+            assert!(rendered.contains("jeera search --help"));
+            assert!(rendered.contains("jeera show <ISSUE_KEY>"));
+            assert!(rendered.contains("jeera --help"));
+        }
+    }
+
+    #[test]
+    fn top_level_help_describes_the_task_oriented_commands() {
+        let error = Cli::try_parse_with_guidance_from(["jeera", "--help"]).unwrap_err();
+        let rendered = error.to_string();
+
+        assert!(rendered.contains("Commands are task-oriented"));
+        assert!(rendered.contains("jeera search --assignee me --open"));
+        assert!(rendered.contains("jeera show GCCDEV-123"));
+    }
 
     #[test]
     fn search_accepts_a_positional_query() {

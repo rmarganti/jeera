@@ -12,7 +12,6 @@ mod issue_show;
 mod jql;
 mod render;
 
-use clap::Parser;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -26,7 +25,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), error::AppError> {
-    let cli = cli::Cli::parse();
+    let cli = cli::Cli::parse_with_guidance();
 
     let settings =
         config::Settings::load().map_err(|source| error::AppError::LoadConfig { source })?;

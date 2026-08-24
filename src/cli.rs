@@ -5,8 +5,8 @@ use clap::{Args, Parser, Subcommand, error::ErrorKind};
 #[derive(Debug, Parser)]
 #[command(
     name = "jeera",
-    about = "Read-only Jira CLI for finding and viewing issues",
-    long_about = "List Jira boards, search issues, and view issue details. Commands are task-oriented: use `search` to find issues and `show` to view one issue.",
+    about = "Jira CLI for finding, viewing, creating, and updating issues",
+    long_about = "List Jira boards, search issues, view issue details, and perform explicitly enabled mutations. Commands are task-oriented: use `search` to find issues and `show` to view one issue.",
     after_help = "Examples:\n  jeera boards\n  jeera search --assignee me --open\n  jeera show GCCDEV-123"
 )]
 pub struct Cli {
@@ -20,6 +20,7 @@ pub enum Command {
     Search(Box<SearchArgs>),
     Show(ShowArgs),
     Create(CreateArgs),
+    Update(UpdateArgs),
     ShowCreateMeta(ShowCreateMetaArgs),
     ShowEditMeta(ShowEditMetaArgs),
     ShowTransitions(ShowTransitionsArgs),
@@ -27,7 +28,7 @@ pub enum Command {
 
 impl Command {
     pub fn is_mutation(&self) -> bool {
-        matches!(self, Self::Create(_))
+        matches!(self, Self::Create(_) | Self::Update(_))
     }
 }
 
@@ -193,6 +194,44 @@ pub struct CreateArgs {
 
     #[arg(long)]
     pub label: Vec<String>,
+
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub field: Vec<String>,
+
+    #[arg(long)]
+    pub dry_run: bool,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UpdateArgs {
+    pub issue_key: String,
+
+    #[arg(long)]
+    pub summary: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["body_file", "clear_body"])]
+    pub body: Option<String>,
+
+    #[arg(long, value_name = "PATH|-", conflicts_with_all = ["body", "clear_body"])]
+    pub body_file: Option<String>,
+
+    #[arg(long, conflicts_with = "clear_components")]
+    pub component: Option<Vec<String>>,
+
+    #[arg(long, conflicts_with = "clear_labels")]
+    pub label: Option<Vec<String>>,
+
+    #[arg(long)]
+    pub clear_body: bool,
+
+    #[arg(long)]
+    pub clear_components: bool,
+
+    #[arg(long)]
+    pub clear_labels: bool,
 
     #[arg(long, value_name = "KEY=VALUE")]
     pub field: Vec<String>,
@@ -372,10 +411,12 @@ mod tests {
             "--summary",
             "Demo",
         ]);
+        let update = Cli::parse_from(["jeera", "update", "GCCDEV-1", "--summary", "Demo"]);
         let show = Cli::parse_from(["jeera", "show", "GCCDEV-1"]);
         let metadata = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-1"]);
 
         assert!(create.command.is_mutation());
+        assert!(update.command.is_mutation());
         assert!(!show.command.is_mutation());
         assert!(!metadata.command.is_mutation());
     }
@@ -414,6 +455,35 @@ mod tests {
                 assert!(args.dry_run);
             }
             other => panic!("expected create command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_accepts_friendly_fields_and_clear_flags() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "update",
+            "GCCDEV-1",
+            "--summary",
+            "Updated",
+            "--component",
+            "Homes",
+            "--clear-labels",
+            "--field",
+            "customfield_1=value",
+            "--dry-run",
+        ]);
+
+        match cli.command {
+            Command::Update(args) => {
+                assert_eq!(args.issue_key, "GCCDEV-1");
+                assert_eq!(args.summary.as_deref(), Some("Updated"));
+                assert_eq!(args.component, Some(vec!["Homes".to_string()]));
+                assert!(args.clear_labels);
+                assert_eq!(args.field, vec!["customfield_1=value"]);
+                assert!(args.dry_run);
+            }
+            other => panic!("expected update command, got {other:?}"),
         }
     }
 

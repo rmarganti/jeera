@@ -132,6 +132,12 @@ pub struct CreateIssueResponse {
     pub self_link: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdateIssueRequest {
+    pub issue_id_or_key: String,
+    pub fields: BTreeMap<String, Value>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GetIssueRequest {
     pub issue_id_or_key: String,

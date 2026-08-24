@@ -26,6 +26,9 @@ pub enum AppError {
     #[error("invalid create request: {reason}")]
     InvalidCreate { reason: String },
 
+    #[error("invalid update request: {reason}")]
+    InvalidUpdate { reason: String },
+
     #[error("while preparing board {board_id} for search: {source}")]
     PrepareBoardSearch { board_id: u64, source: JiraError },
 
@@ -53,6 +56,9 @@ pub enum AppError {
 
     #[error("while executing create: {source}")]
     ExecuteCreate { source: JiraError },
+
+    #[error("while executing update: {source}")]
+    ExecuteUpdate { source: JiraError },
 
     #[error("while reading input: {source}")]
     ReadInput { source: std::io::Error },

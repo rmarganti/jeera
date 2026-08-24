@@ -4,7 +4,7 @@ use crate::client::types::{
     GetEditMetaResponse, GetIssueRequest, GetIssueResponse, GetTransitionsRequest,
     GetTransitionsResponse, JiraError, JiraErrorResponse, ListBoardIssuesRequest,
     ListBoardIssuesResponse, ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest,
-    SearchIssuesResponse,
+    SearchIssuesResponse, UpdateIssueRequest,
 };
 use crate::config::SearchProfileSettings;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -52,6 +52,19 @@ impl JiraClient {
         request: &CreateIssueRequest,
     ) -> Result<CreateIssueResponse, JiraError> {
         self.send_json(ureq::http::Method::POST, "rest/api/3/issue", Some(request))
+    }
+
+    pub fn update_issue(&self, request: &UpdateIssueRequest) -> Result<(), JiraError> {
+        #[derive(Serialize)]
+        struct UpdateIssueBody<'a> {
+            fields: &'a BTreeMap<String, serde_json::Value>,
+        }
+
+        let path = format!("rest/api/3/issue/{}", request.issue_id_or_key);
+        let body = UpdateIssueBody {
+            fields: &request.fields,
+        };
+        self.send_json_without_response(ureq::http::Method::PUT, &path, &body)
     }
 
     pub fn get_issue<F>(&self, request: &GetIssueRequest) -> Result<GetIssueResponse<F>, JiraError>
@@ -217,6 +230,31 @@ impl JiraClient {
         Request: Serialize,
         Response: DeserializeOwned,
     {
+        let body = self.send(method, path, body)?;
+        serde_json::from_str(&body).map_err(|source| JiraError::DecodeResponse { source })
+    }
+
+    fn send_json_without_response<Request>(
+        &self,
+        method: ureq::http::Method,
+        path: &str,
+        body: &Request,
+    ) -> Result<(), JiraError>
+    where
+        Request: Serialize,
+    {
+        self.send(method, path, Some(body)).map(|_| ())
+    }
+
+    fn send<Request>(
+        &self,
+        method: ureq::http::Method,
+        path: &str,
+        body: Option<&Request>,
+    ) -> Result<String, JiraError>
+    where
+        Request: Serialize,
+    {
         let url = self
             .config
             .base_url
@@ -266,7 +304,7 @@ impl JiraClient {
             });
         }
 
-        serde_json::from_str(&body).map_err(|source| JiraError::DecodeResponse { source })
+        Ok(body)
     }
 
     fn authorization_header(&self) -> String {
@@ -520,6 +558,30 @@ mod tests {
         assert_eq!(body["fields"]["issuetype"]["name"], "Task");
         assert_eq!(body["fields"]["summary"], "Create something");
         assert_eq!(response.key, "DEMO-101");
+    }
+
+    #[test]
+    fn update_issue_sends_expected_request() {
+        let (base_url, rx) = spawn_server("204 No Content", String::new());
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = UpdateIssueRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+            fields: BTreeMap::from([("summary".to_string(), serde_json::json!("Updated"))]),
+        };
+
+        client.update_issue(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let body: Value = serde_json::from_str(&captured.body).unwrap();
+
+        assert_eq!(captured.method, "PUT");
+        assert_eq!(captured.path, "/rest/api/3/issue/DEMO-101");
+        assert_eq!(body["fields"]["summary"], "Updated");
+        assert!(body.get("issue_id_or_key").is_none());
     }
 
     #[test]

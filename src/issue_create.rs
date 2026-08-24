@@ -10,11 +10,12 @@ use crate::client::{
     types::{CreateIssueRequest, CreateIssueResponse, GetCreateMetaRequest, ListBoardsRequest},
 };
 use crate::error::AppError;
+use crate::issue_fields::{
+    CollectionChange, CommonIssueFieldInput, PrepareIssueFieldsError, prepare_common_fields,
+};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
-use std::fs;
-use std::io::{self, Read, Write};
+use serde_json::{Value, json};
+use std::io::Write;
 
 #[derive(Debug)]
 pub struct PreparedCreateIssue {
@@ -86,77 +87,65 @@ impl PreparedCreateIssue {
 }
 
 fn prepare(client: &JiraClient, args: &CreateArgs) -> Result<PreparedCreateIssue, AppError> {
-    validate_optional("project", args.project.as_deref())
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_optional("board", args.board.as_deref())
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_required("type", &args.issue_type)
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_required("summary", &args.summary)
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_optional("body", args.body.as_deref())
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_optional("body-file", args.body_file.as_deref())
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_repeated("component", &args.component)
-        .map_err(|reason| AppError::InvalidCreate { reason })?;
-    validate_repeated("label", &args.label).map_err(|reason| AppError::InvalidCreate { reason })?;
+    validate_create_arg("project", args.project.as_deref())?;
+    validate_create_arg("board", args.board.as_deref())?;
+    validate_create_arg("type", Some(&args.issue_type))?;
+    validate_create_arg("summary", Some(&args.summary))?;
 
     let project_key = resolve_project_key(client, args)?;
-    let body = read_body(args)?;
-
-    let mut fields = BTreeMap::from([
-        ("project".to_string(), json!({ "key": project_key })),
-        (
-            "issuetype".to_string(),
-            json!({ "name": args.issue_type.trim() }),
-        ),
-        ("summary".to_string(), json!(args.summary.trim())),
-    ]);
-
-    if let Some(body) = body.as_deref().filter(|body| !body.trim().is_empty()) {
-        fields.insert("description".to_string(), text_to_adf(body));
-    }
-
-    if !args.component.is_empty() {
-        fields.insert(
-            "components".to_string(),
-            Value::Array(
-                args.component
-                    .iter()
-                    .map(|component| json!({ "name": component.trim() }))
-                    .collect(),
-            ),
-        );
-    }
-
-    if !args.label.is_empty() {
-        fields.insert(
-            "labels".to_string(),
-            Value::Array(
-                args.label
-                    .iter()
-                    .map(|label| Value::String(label.trim().to_string()))
-                    .collect(),
-            ),
-        );
-    }
-
-    for field in &args.field {
-        let (key, value) =
-            parse_field_assignment(field).map_err(|reason| AppError::InvalidCreate { reason })?;
-        if fields.contains_key(&key) {
-            return Err(AppError::InvalidCreate {
-                reason: format!("--field cannot override built-in field {key:?}"),
-            });
-        }
-        fields.insert(key, Value::String(value));
-    }
+    let mut fields = prepare_common_fields(CommonIssueFieldInput {
+        summary: Some(&args.summary),
+        body: args.body.as_deref(),
+        body_file: args.body_file.as_deref(),
+        clear_body: false,
+        components: if args.component.is_empty() {
+            CollectionChange::Unchanged
+        } else {
+            CollectionChange::Set(&args.component)
+        },
+        labels: if args.label.is_empty() {
+            CollectionChange::Unchanged
+        } else {
+            CollectionChange::Set(&args.label)
+        },
+        custom_fields: &args.field,
+        reserved_fields: &[
+            "project",
+            "issuetype",
+            "summary",
+            "description",
+            "components",
+            "labels",
+        ],
+    })
+    .map_err(map_field_error)?;
+    fields.insert("project".to_string(), json!({ "key": project_key }));
+    fields.insert(
+        "issuetype".to_string(),
+        json!({ "name": args.issue_type.trim() }),
+    );
 
     Ok(PreparedCreateIssue {
         request: CreateIssueRequest { fields },
         dry_run: args.dry_run,
     })
+}
+
+fn validate_create_arg(name: &str, value: Option<&str>) -> Result<(), AppError> {
+    if value.is_some_and(|value| value.trim().is_empty()) {
+        Err(AppError::InvalidCreate {
+            reason: format!("--{name} cannot be empty"),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn map_field_error(error: PrepareIssueFieldsError) -> AppError {
+    match error {
+        PrepareIssueFieldsError::Invalid(reason) => AppError::InvalidCreate { reason },
+        PrepareIssueFieldsError::ReadInput { source } => AppError::ReadInput { source },
+    }
 }
 
 fn validate_against_create_meta(
@@ -266,72 +255,6 @@ fn load_boards(client: &JiraClient) -> Result<Vec<crate::client::types::BoardRes
         .map_err(|source| AppError::ExecuteCreate { source })
 }
 
-fn read_body(args: &CreateArgs) -> Result<Option<String>, AppError> {
-    if let Some(body) = &args.body {
-        return Ok(Some(body.clone()));
-    }
-
-    let Some(path) = &args.body_file else {
-        return Ok(None);
-    };
-
-    if path == "-" {
-        let mut body = String::new();
-        io::stdin()
-            .read_to_string(&mut body)
-            .map_err(|source| AppError::ReadInput { source })?;
-        return Ok(Some(body));
-    }
-
-    fs::read_to_string(path)
-        .map(Some)
-        .map_err(|source| AppError::ReadInput { source })
-}
-
-fn parse_field_assignment(value: &str) -> Result<(String, String), String> {
-    let Some((key, value)) = value.split_once('=') else {
-        return Err("--field values must use KEY=VALUE".to_string());
-    };
-    let key = key.trim();
-    if key.is_empty() {
-        return Err("--field keys cannot be empty".to_string());
-    }
-    if value.trim().is_empty() {
-        return Err(format!("--field {key} value cannot be empty"));
-    }
-    Ok((key.to_string(), value.trim().to_string()))
-}
-
-fn text_to_adf(text: &str) -> Value {
-    let content = text
-        .split("\n\n")
-        .filter_map(|paragraph| {
-            let paragraph = paragraph.trim();
-            if paragraph.is_empty() {
-                return None;
-            }
-
-            let mut paragraph_content = Vec::new();
-            for (index, line) in paragraph.lines().enumerate() {
-                if index > 0 {
-                    paragraph_content.push(json!({ "type": "hardBreak" }));
-                }
-                if !line.is_empty() {
-                    paragraph_content.push(json!({ "type": "text", "text": line }));
-                }
-            }
-
-            Some(json!({ "type": "paragraph", "content": paragraph_content }))
-        })
-        .collect::<Vec<_>>();
-
-    let mut document = Map::new();
-    document.insert("type".to_string(), Value::String("doc".to_string()));
-    document.insert("version".to_string(), json!(1));
-    document.insert("content".to_string(), Value::Array(content));
-    Value::Object(document)
-}
-
 fn output_from_prepared(
     prepared: PreparedCreateIssue,
     response: Option<CreateIssueResponse>,
@@ -359,29 +282,6 @@ fn output_from_prepared(
         id: response.as_ref().map(|response| response.id.clone()),
         url,
         request: prepared.request,
-    }
-}
-
-fn validate_required(name: &str, value: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        Err(format!("--{name} cannot be empty"))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_optional(name: &str, value: Option<&str>) -> Result<(), String> {
-    match value {
-        Some(value) => validate_required(name, value),
-        None => Ok(()),
-    }
-}
-
-fn validate_repeated(name: &str, values: &[String]) -> Result<(), String> {
-    if values.iter().any(|value| value.trim().is_empty()) {
-        Err(format!("--{name} cannot contain empty values"))
-    } else {
-        Ok(())
     }
 }
 
@@ -450,26 +350,6 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid create request: provide --project, --board, or configure default_board_id"
-        );
-    }
-
-    #[test]
-    fn adf_preserves_line_breaks_inside_paragraphs() {
-        let adf = text_to_adf("One\nTwo\n\nThree");
-
-        assert_eq!(adf["type"], "doc");
-        assert_eq!(adf["content"].as_array().unwrap().len(), 2);
-        assert_eq!(adf["content"][0]["content"][1]["type"], "hardBreak");
-    }
-
-    #[test]
-    fn field_assignment_requires_key_value_shape() {
-        assert!(parse_field_assignment("missing").is_err());
-        assert!(parse_field_assignment("=value").is_err());
-        assert!(parse_field_assignment("key= ").is_err());
-        assert_eq!(
-            parse_field_assignment("customfield_1=value").unwrap(),
-            ("customfield_1".to_string(), "value".to_string())
         );
     }
 }

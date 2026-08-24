@@ -1,6 +1,6 @@
 # jeera
 
-Jira CLI for listing boards, searching issues, viewing issue details, inspecting metadata, and creating issues.
+Jira CLI for listing boards, searching issues, viewing issue details, inspecting metadata, and explicitly enabled issue mutations.
 
 ## Configuration
 
@@ -209,6 +209,30 @@ Examples:
 jeera create --project GCCDEV --type Task --summary "Add homes intake validation" --body-file ./ticket-body.md --component Homes --label homes-2 --dry-run
 jeera create --board 'GCCDEV Kanban Board' --type Spike --summary "Discover canonical market source" --body "Identify the canonical source."
 ```
+
+### `jeera update`
+
+Update an existing Jira issue through friendly field flags. Mutation commands are disabled by default and require `"mutations_enabled": true` in the jeera config. Omitted fields remain unchanged; repeated component and label values replace the corresponding collection.
+
+```sh
+jeera update GCCDEV-123 --summary "Clarify homes intake validation"
+jeera update GCCDEV-123 --body-file ./ticket-body.md --component Homes --label homes-2
+jeera update GCCDEV-123 --clear-body --clear-labels
+```
+
+Options:
+
+- `--summary <TEXT>` replace the issue summary
+- `--body <TEXT>` replace the description/body
+- `--body-file <PATH|->` replace the description/body from a file or stdin
+- `--component <COMPONENT>` repeatable; replace all components
+- `--label <LABEL>` repeatable; replace all labels
+- `--clear-body`, `--clear-components`, `--clear-labels` explicitly clear values
+- `--field <KEY=VALUE>` repeatable string-valued field escape hatch
+- `--dry-run` validate against Jira edit metadata without updating the issue
+- `--json`
+
+Before updating, jeera loads edit metadata and verifies that every requested field supports Jira's `set` operation.
 
 ### `jeera show-create-meta`
 

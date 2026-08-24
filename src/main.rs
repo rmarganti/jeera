@@ -6,9 +6,11 @@ mod config;
 mod error;
 mod issue_boards;
 mod issue_create;
+mod issue_fields;
 mod issue_metadata;
 mod issue_search;
 mod issue_show;
+mod issue_update;
 mod jql;
 mod render;
 

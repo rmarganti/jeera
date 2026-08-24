@@ -1,7 +1,10 @@
 use crate::client::types::{
-    GetBoardConfigurationRequest, GetBoardConfigurationResponse, GetIssueRequest, GetIssueResponse,
-    JiraError, JiraErrorResponse, ListBoardIssuesRequest, ListBoardIssuesResponse,
-    ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest, SearchIssuesResponse,
+    CreateIssueRequest, CreateIssueResponse, GetBoardConfigurationRequest,
+    GetBoardConfigurationResponse, GetCreateMetaRequest, GetCreateMetaResponse, GetEditMetaRequest,
+    GetEditMetaResponse, GetIssueRequest, GetIssueResponse, GetTransitionsRequest,
+    GetTransitionsResponse, JiraError, JiraErrorResponse, ListBoardIssuesRequest,
+    ListBoardIssuesResponse, ListBoardsRequest, ListBoardsResponse, SearchIssuesRequest,
+    SearchIssuesResponse, UpdateIssueRequest,
 };
 use crate::config::SearchProfileSettings;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -42,6 +45,26 @@ impl JiraClient {
             config,
             http: http_config.into(),
         }
+    }
+
+    pub fn create_issue(
+        &self,
+        request: &CreateIssueRequest,
+    ) -> Result<CreateIssueResponse, JiraError> {
+        self.send_json(ureq::http::Method::POST, "rest/api/3/issue", Some(request))
+    }
+
+    pub fn update_issue(&self, request: &UpdateIssueRequest) -> Result<(), JiraError> {
+        #[derive(Serialize)]
+        struct UpdateIssueBody<'a> {
+            fields: &'a BTreeMap<String, serde_json::Value>,
+        }
+
+        let path = format!("rest/api/3/issue/{}", request.issue_id_or_key);
+        let body = UpdateIssueBody {
+            fields: &request.fields,
+        };
+        self.send_json_without_response(ureq::http::Method::PUT, &path, &body)
     }
 
     pub fn get_issue<F>(&self, request: &GetIssueRequest) -> Result<GetIssueResponse<F>, JiraError>
@@ -150,6 +173,44 @@ impl JiraClient {
         )
     }
 
+    pub fn get_create_meta(
+        &self,
+        request: &GetCreateMetaRequest,
+    ) -> Result<GetCreateMetaResponse, JiraError> {
+        let mut path = "rest/api/3/issue/createmeta".to_string();
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+
+        query.append_pair("projectKeys", &request.project_key);
+        if let Some(issue_type_name) = &request.issue_type_name {
+            query.append_pair("issuetypeNames", issue_type_name);
+        }
+        query.append_pair("expand", "projects.issuetypes.fields");
+
+        let query = query.finish();
+        path.push('?');
+        path.push_str(&query);
+
+        self.send_json::<(), GetCreateMetaResponse>(ureq::http::Method::GET, &path, None)
+    }
+
+    pub fn get_edit_meta(
+        &self,
+        request: &GetEditMetaRequest,
+    ) -> Result<GetEditMetaResponse, JiraError> {
+        let path = format!("rest/api/3/issue/{}/editmeta", request.issue_id_or_key);
+
+        self.send_json::<(), GetEditMetaResponse>(ureq::http::Method::GET, &path, None)
+    }
+
+    pub fn get_transitions(
+        &self,
+        request: &GetTransitionsRequest,
+    ) -> Result<GetTransitionsResponse, JiraError> {
+        let path = format!("rest/api/3/issue/{}/transitions", request.issue_id_or_key);
+
+        self.send_json::<(), GetTransitionsResponse>(ureq::http::Method::GET, &path, None)
+    }
+
     pub fn get_board_configuration(
         &self,
         request: &GetBoardConfigurationRequest,
@@ -168,6 +229,31 @@ impl JiraClient {
     where
         Request: Serialize,
         Response: DeserializeOwned,
+    {
+        let body = self.send(method, path, body)?;
+        serde_json::from_str(&body).map_err(|source| JiraError::DecodeResponse { source })
+    }
+
+    fn send_json_without_response<Request>(
+        &self,
+        method: ureq::http::Method,
+        path: &str,
+        body: &Request,
+    ) -> Result<(), JiraError>
+    where
+        Request: Serialize,
+    {
+        self.send(method, path, Some(body)).map(|_| ())
+    }
+
+    fn send<Request>(
+        &self,
+        method: ureq::http::Method,
+        path: &str,
+        body: Option<&Request>,
+    ) -> Result<String, JiraError>
+    where
+        Request: Serialize,
     {
         let url = self
             .config
@@ -218,7 +304,7 @@ impl JiraClient {
             });
         }
 
-        serde_json::from_str(&body).map_err(|source| JiraError::DecodeResponse { source })
+        Ok(body)
     }
 
     fn authorization_header(&self) -> String {
@@ -441,6 +527,64 @@ mod tests {
     }
 
     #[test]
+    fn create_issue_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "201 Created",
+            r#"{"id":"10001","key":"DEMO-101","self":"https://example.atlassian.net/rest/api/3/issue/10001"}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = CreateIssueRequest {
+            fields: BTreeMap::from([
+                ("project".to_string(), serde_json::json!({"key":"DEMO"})),
+                ("issuetype".to_string(), serde_json::json!({"name":"Task"})),
+                ("summary".to_string(), serde_json::json!("Create something")),
+            ]),
+        };
+
+        let response = client.create_issue(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let body: Value = serde_json::from_str(&captured.body).unwrap();
+        let headers = captured.headers.to_ascii_lowercase();
+
+        assert_eq!(captured.method, "POST");
+        assert_eq!(captured.path, "/rest/api/3/issue");
+        assert!(headers.contains("content-type: application/json"));
+        assert_eq!(body["fields"]["project"]["key"], "DEMO");
+        assert_eq!(body["fields"]["issuetype"]["name"], "Task");
+        assert_eq!(body["fields"]["summary"], "Create something");
+        assert_eq!(response.key, "DEMO-101");
+    }
+
+    #[test]
+    fn update_issue_sends_expected_request() {
+        let (base_url, rx) = spawn_server("204 No Content", String::new());
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = UpdateIssueRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+            fields: BTreeMap::from([("summary".to_string(), serde_json::json!("Updated"))]),
+        };
+
+        client.update_issue(&request).unwrap();
+        let captured = rx.recv().unwrap();
+        let body: Value = serde_json::from_str(&captured.body).unwrap();
+
+        assert_eq!(captured.method, "PUT");
+        assert_eq!(captured.path, "/rest/api/3/issue/DEMO-101");
+        assert_eq!(body["fields"]["summary"], "Updated");
+        assert!(body.get("issue_id_or_key").is_none());
+    }
+
+    #[test]
     fn search_issues_sends_expected_request() {
         let (base_url, rx) = spawn_server("200 OK", fixture("search-basic.json"));
         let client = client(
@@ -569,6 +713,87 @@ mod tests {
         assert!(captured.body.is_empty());
         assert_eq!(response.filter.id, "10492");
         assert_eq!(response.sub_query.query, "fixVersion is EMPTY");
+    }
+
+    #[test]
+    fn get_create_meta_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"projects":[{"id":"10000","key":"DEMO","name":"Demo","issuetypes":[{"id":"10136","name":"Task","fields":{}}]}]}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetCreateMetaRequest {
+            project_key: "DEMO".to_string(),
+            issue_type_name: Some("Task".to_string()),
+        };
+
+        let response = client.get_create_meta(&request).unwrap();
+        let captured = rx.recv().unwrap();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(
+            captured.path,
+            "/rest/api/3/issue/createmeta?projectKeys=DEMO&issuetypeNames=Task&expand=projects.issuetypes.fields"
+        );
+        assert!(captured.body.is_empty());
+        assert_eq!(response.projects[0].key, "DEMO");
+        assert_eq!(response.projects[0].issuetypes[0].name, "Task");
+    }
+
+    #[test]
+    fn get_edit_meta_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"fields":{"summary":{"required":true,"name":"Summary","key":"summary","operations":["set"],"schema":{"type":"string"}}}}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetEditMetaRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+        };
+
+        let response = client.get_edit_meta(&request).unwrap();
+        let captured = rx.recv().unwrap();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(captured.path, "/rest/api/3/issue/DEMO-101/editmeta");
+        assert!(captured.body.is_empty());
+        assert_eq!(response.fields["summary"].name, "Summary");
+    }
+
+    #[test]
+    fn get_transitions_sends_expected_request() {
+        let (base_url, rx) = spawn_server(
+            "200 OK",
+            r#"{"transitions":[{"id":"61","name":"Start Progress","to":{"id":"3","name":"In Progress","statusCategory":{"key":"indeterminate","name":"In Progress"}},"hasScreen":false,"isAvailable":true}]}"#.to_string(),
+        );
+        let client = client(
+            &base_url,
+            JiraAuth::Bearer {
+                token: "secret-token".to_string(),
+            },
+        );
+        let request = GetTransitionsRequest {
+            issue_id_or_key: "DEMO-101".to_string(),
+        };
+
+        let response = client.get_transitions(&request).unwrap();
+        let captured = rx.recv().unwrap();
+
+        assert_eq!(captured.method, "GET");
+        assert_eq!(captured.path, "/rest/api/3/issue/DEMO-101/transitions");
+        assert!(captured.body.is_empty());
+        assert_eq!(response.transitions[0].name, "Start Progress");
+        assert_eq!(response.transitions[0].to.name, "In Progress");
     }
 
     #[test]

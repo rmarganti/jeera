@@ -5,8 +5,8 @@ use clap::{Args, Parser, Subcommand, error::ErrorKind};
 #[derive(Debug, Parser)]
 #[command(
     name = "jeera",
-    about = "Read-only Jira CLI for finding and viewing issues",
-    long_about = "List Jira boards, search issues, and view issue details. Commands are task-oriented: use `search` to find issues and `show` to view one issue.",
+    about = "Jira CLI for finding, viewing, creating, and updating issues",
+    long_about = "List Jira boards, search issues, view issue details, and perform explicitly enabled mutations. Commands are task-oriented: use `search` to find issues and `show` to view one issue.",
     after_help = "Examples:\n  jeera boards\n  jeera search --assignee me --open\n  jeera show GCCDEV-123"
 )]
 pub struct Cli {
@@ -19,6 +19,17 @@ pub enum Command {
     Boards(BoardsArgs),
     Search(Box<SearchArgs>),
     Show(ShowArgs),
+    Create(CreateArgs),
+    Update(UpdateArgs),
+    ShowCreateMeta(ShowCreateMetaArgs),
+    ShowEditMeta(ShowEditMetaArgs),
+    ShowTransitions(ShowTransitionsArgs),
+}
+
+impl Command {
+    pub fn is_mutation(&self) -> bool {
+        matches!(self, Self::Create(_) | Self::Update(_))
+    }
 }
 
 impl Cli {
@@ -158,6 +169,111 @@ pub struct ShowArgs {
     pub comments: bool,
 }
 
+#[derive(Debug, Args, Default)]
+pub struct CreateArgs {
+    #[arg(long, conflicts_with = "board")]
+    pub project: Option<String>,
+
+    #[arg(long, value_name = "ID|NAME", help = "Board id or exact board name")]
+    pub board: Option<String>,
+
+    #[arg(long = "type", alias = "issue-type")]
+    pub issue_type: String,
+
+    #[arg(long)]
+    pub summary: String,
+
+    #[arg(long, conflicts_with = "body_file")]
+    pub body: Option<String>,
+
+    #[arg(long, value_name = "PATH|-", conflicts_with = "body")]
+    pub body_file: Option<String>,
+
+    #[arg(long)]
+    pub component: Vec<String>,
+
+    #[arg(long)]
+    pub label: Vec<String>,
+
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub field: Vec<String>,
+
+    #[arg(long)]
+    pub dry_run: bool,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UpdateArgs {
+    pub issue_key: String,
+
+    #[arg(long)]
+    pub summary: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["body_file", "clear_body"])]
+    pub body: Option<String>,
+
+    #[arg(long, value_name = "PATH|-", conflicts_with_all = ["body", "clear_body"])]
+    pub body_file: Option<String>,
+
+    #[arg(long, conflicts_with = "clear_components")]
+    pub component: Option<Vec<String>>,
+
+    #[arg(long, conflicts_with = "clear_labels")]
+    pub label: Option<Vec<String>>,
+
+    #[arg(long)]
+    pub clear_body: bool,
+
+    #[arg(long)]
+    pub clear_components: bool,
+
+    #[arg(long)]
+    pub clear_labels: bool,
+
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub field: Vec<String>,
+
+    #[arg(long)]
+    pub dry_run: bool,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct ShowCreateMetaArgs {
+    #[arg(long, conflicts_with = "board")]
+    pub project: Option<String>,
+
+    #[arg(long, value_name = "ID|NAME", help = "Board id or exact board name")]
+    pub board: Option<String>,
+
+    #[arg(long = "type", alias = "issue-type")]
+    pub issue_type: Option<String>,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct ShowEditMetaArgs {
+    pub issue_key: String,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct ShowTransitionsArgs {
+    pub issue_key: String,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,6 +396,143 @@ mod tests {
                 assert_eq!(args.query.as_deref(), Some("demo"));
             }
             other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_only_mutating_commands_as_mutations() {
+        let create = Cli::parse_from([
+            "jeera",
+            "create",
+            "--project",
+            "GCCDEV",
+            "--type",
+            "Task",
+            "--summary",
+            "Demo",
+        ]);
+        let update = Cli::parse_from(["jeera", "update", "GCCDEV-1", "--summary", "Demo"]);
+        let show = Cli::parse_from(["jeera", "show", "GCCDEV-1"]);
+        let metadata = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-1"]);
+
+        assert!(create.command.is_mutation());
+        assert!(update.command.is_mutation());
+        assert!(!show.command.is_mutation());
+        assert!(!metadata.command.is_mutation());
+    }
+
+    #[test]
+    fn create_accepts_cli_fields() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "create",
+            "--project",
+            "GCCDEV",
+            "--type",
+            "Task",
+            "--summary",
+            "Add homes intake validation",
+            "--body-file",
+            "body.md",
+            "--component",
+            "Homes",
+            "--label",
+            "homes-2",
+            "--field",
+            "customfield_12345=demo",
+            "--dry-run",
+        ]);
+
+        match cli.command {
+            Command::Create(args) => {
+                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.issue_type, "Task");
+                assert_eq!(args.summary, "Add homes intake validation");
+                assert_eq!(args.body_file.as_deref(), Some("body.md"));
+                assert_eq!(args.component, vec!["Homes"]);
+                assert_eq!(args.label, vec!["homes-2"]);
+                assert_eq!(args.field, vec!["customfield_12345=demo"]);
+                assert!(args.dry_run);
+            }
+            other => panic!("expected create command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_accepts_friendly_fields_and_clear_flags() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "update",
+            "GCCDEV-1",
+            "--summary",
+            "Updated",
+            "--component",
+            "Homes",
+            "--clear-labels",
+            "--field",
+            "customfield_1=value",
+            "--dry-run",
+        ]);
+
+        match cli.command {
+            Command::Update(args) => {
+                assert_eq!(args.issue_key, "GCCDEV-1");
+                assert_eq!(args.summary.as_deref(), Some("Updated"));
+                assert_eq!(args.component, Some(vec!["Homes".to_string()]));
+                assert!(args.clear_labels);
+                assert_eq!(args.field, vec!["customfield_1=value"]);
+                assert!(args.dry_run);
+            }
+            other => panic!("expected update command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn metadata_commands_use_show_names() {
+        let cli = Cli::parse_from([
+            "jeera",
+            "show-create-meta",
+            "--project",
+            "GCCDEV",
+            "--type",
+            "Task",
+        ]);
+        match cli.command {
+            Command::ShowCreateMeta(args) => {
+                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.issue_type.as_deref(), Some("Task"));
+            }
+            other => panic!("expected show-create-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-create-meta", "--board", "GCCDEV Board"]);
+        match cli.command {
+            Command::ShowCreateMeta(args) => {
+                assert_eq!(args.project, None);
+                assert_eq!(args.board.as_deref(), Some("GCCDEV Board"));
+            }
+            other => panic!("expected show-create-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-create-meta"]);
+        match cli.command {
+            Command::ShowCreateMeta(args) => {
+                assert_eq!(args.project, None);
+                assert_eq!(args.board, None);
+            }
+            other => panic!("expected show-create-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-6902"]);
+        match cli.command {
+            Command::ShowEditMeta(args) => assert_eq!(args.issue_key, "GCCDEV-6902"),
+            other => panic!("expected show-edit-meta command, got {other:?}"),
+        }
+
+        let cli = Cli::parse_from(["jeera", "show-transitions", "GCCDEV-6902"]);
+        match cli.command {
+            Command::ShowTransitions(args) => assert_eq!(args.issue_key, "GCCDEV-6902"),
+            other => panic!("expected show-transitions command, got {other:?}"),
         }
     }
 }

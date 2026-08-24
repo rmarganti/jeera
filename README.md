@@ -1,6 +1,6 @@
 # jeera
 
-Read-only Jira CLI for listing boards, searching issues, and viewing issue details.
+Jira CLI for listing boards, searching issues, viewing issue details, inspecting metadata, and explicitly enabled issue mutations.
 
 ## Configuration
 
@@ -16,6 +16,7 @@ Read-only Jira CLI for listing boards, searching issues, and viewing issue detai
 {
   "base_url": "https://your-domain.atlassian.net",
   "http_timeout_seconds": 30,
+  "mutations_enabled": false,
   "default_board_id": 215,
   "auth": {
     "type": "basic",
@@ -42,7 +43,8 @@ Read-only Jira CLI for listing boards, searching issues, and viewing issue detai
 - `base_url`: absolute `http` or `https` Jira base URL
 - `auth`: `basic` or `bearer`
 - `http_timeout_seconds`: optional, defaults to `30`
-- `default_board_id`: optional board id used by `jeera search` when `--board` is omitted
+- `mutations_enabled`: optional, defaults to `false`; a human must manually set this to `true` before mutation commands can run
+- `default_board_id`: optional board id used by commands such as `jeera search`, `jeera show-create-meta`, and `jeera create` when `--board`/`--project` is omitted
 - `searches`: optional map of saved search profiles for `jeera search --profile <NAME>`
 
 ### Saved search profiles
@@ -175,3 +177,84 @@ jeera show GCCDEV-123 --comments --json
 ```
 
 Human output includes summary, status, type, priority, assignee, reporter, created/updated timestamps, components, description, and optional comments.
+
+### `jeera create`
+
+Create a Jira issue. Mutation commands are disabled by default. Before this command can run, a human must manually set `"mutations_enabled": true` in the jeera config. Creation is CLI-first: use flags for fields, and use `--body-file` only when the description/body is long.
+
+```sh
+jeera create --project GCCDEV --type Task --summary "Add homes intake validation" [OPTIONS]
+jeera create --board 215 --type Spike --summary "Discover source" --body-file ./body.md
+```
+
+Options:
+
+- `--project <KEY>` Jira project key; conflicts with `--board`
+- `--board <ID|NAME>` derive the project from a board; falls back to `default_board_id` when both `--project` and `--board` are omitted
+- `--type <TYPE>` / `--issue-type <TYPE>` issue type name
+- `--summary <TEXT>` issue summary
+- `--body <TEXT>` issue description/body text
+- `--body-file <PATH|->` read issue description/body text from a file or stdin
+- `--component <COMPONENT>` repeatable
+- `--label <LABEL>` repeatable
+- `--field <KEY=VALUE>` repeatable string-valued field escape hatch for required Jira fields that do not yet have dedicated flags
+- `--dry-run` validate and print what would be created without creating the issue
+- `--json`
+
+Before creating, jeera loads Jira create metadata for the resolved project and issue type, then rejects missing required create fields with a clear error.
+
+Examples:
+
+```sh
+jeera create --project GCCDEV --type Task --summary "Add homes intake validation" --body-file ./ticket-body.md --component Homes --label homes-2 --dry-run
+jeera create --board 'GCCDEV Kanban Board' --type Spike --summary "Discover canonical market source" --body "Identify the canonical source."
+```
+
+### `jeera update`
+
+Update an existing Jira issue through friendly field flags. Mutation commands are disabled by default and require `"mutations_enabled": true` in the jeera config. Omitted fields remain unchanged; repeated component and label values replace the corresponding collection.
+
+```sh
+jeera update GCCDEV-123 --summary "Clarify homes intake validation"
+jeera update GCCDEV-123 --body-file ./ticket-body.md --component Homes --label homes-2
+jeera update GCCDEV-123 --clear-body --clear-labels
+```
+
+Options:
+
+- `--summary <TEXT>` replace the issue summary
+- `--body <TEXT>` replace the description/body
+- `--body-file <PATH|->` replace the description/body from a file or stdin
+- `--component <COMPONENT>` repeatable; replace all components
+- `--label <LABEL>` repeatable; replace all labels
+- `--clear-body`, `--clear-components`, `--clear-labels` explicitly clear values
+- `--field <KEY=VALUE>` repeatable string-valued field escape hatch
+- `--dry-run` validate against Jira edit metadata without updating the issue
+- `--json`
+
+Before updating, jeera loads edit metadata and verifies that every requested field supports Jira's `set` operation.
+
+### `jeera show-create-meta`
+
+Show Jira create metadata, including available issue types and required fields. If `--project` is omitted, jeera can derive the project from `--board` or the configured `default_board_id`.
+
+```sh
+jeera show-create-meta [--project GCCDEV | --board 215] [--type Task] [--json]
+jeera show-create-meta
+```
+
+### `jeera show-edit-meta`
+
+Show editable fields for an existing issue.
+
+```sh
+jeera show-edit-meta GCCDEV-123 [--json]
+```
+
+### `jeera show-transitions`
+
+Show available workflow transitions for an existing issue.
+
+```sh
+jeera show-transitions GCCDEV-123 [--json]
+```

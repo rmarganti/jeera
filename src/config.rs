@@ -18,6 +18,7 @@ pub struct Settings {
     pub base_url: Url,
     pub auth: AuthSettings,
     pub http_timeout: Duration,
+    pub mutations_enabled: bool,
     pub default_board_id: Option<u64>,
     pub searches: BTreeMap<String, SearchProfileSettings>,
 }
@@ -111,6 +112,7 @@ impl fmt::Debug for Settings {
         f.debug_struct("Settings")
             .field("base_url", &self.base_url)
             .field("http_timeout_seconds", &self.http_timeout.as_secs())
+            .field("mutations_enabled", &self.mutations_enabled)
             .field("default_board_id", &self.default_board_id)
             .field("searches", &self.searches)
             .field("auth", &self.auth)
@@ -190,6 +192,8 @@ struct RawSettings {
     #[serde(default = "default_http_timeout_seconds")]
     http_timeout_seconds: u64,
     #[serde(default)]
+    mutations_enabled: bool,
+    #[serde(default)]
     default_board_id: Option<u64>,
     #[serde(default)]
     searches: BTreeMap<String, SearchProfileSettings>,
@@ -208,6 +212,7 @@ impl RawSettings {
             base_url,
             auth: self.auth,
             http_timeout,
+            mutations_enabled: self.mutations_enabled,
             default_board_id: self.default_board_id,
             searches: self.searches,
         })
@@ -365,6 +370,7 @@ mod tests {
         RawSettings {
             base_url: base_url.to_string(),
             http_timeout_seconds,
+            mutations_enabled: false,
             default_board_id: None,
             searches: BTreeMap::new(),
             auth,
@@ -546,6 +552,33 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.http_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn mutations_are_disabled_by_default() {
+        let raw = r#"{
+            "base_url": "https://example.atlassian.net",
+            "auth": { "type": "bearer", "token": "secret" }
+        }"#;
+
+        let settings: RawSettings = serde_json::from_str(raw).unwrap();
+        let settings = settings.validate().unwrap();
+
+        assert!(!settings.mutations_enabled);
+    }
+
+    #[test]
+    fn mutations_can_be_explicitly_enabled() {
+        let raw = r#"{
+            "base_url": "https://example.atlassian.net",
+            "mutations_enabled": true,
+            "auth": { "type": "bearer", "token": "secret" }
+        }"#;
+
+        let settings: RawSettings = serde_json::from_str(raw).unwrap();
+        let settings = settings.validate().unwrap();
+
+        assert!(settings.mutations_enabled);
     }
 
     #[test]

@@ -6,6 +6,10 @@
 
 Its primary goal is to let a user list and view Jira issues they have access to.
 
+## References
+
+Jira's OpenAPI spec is available at `openapi/jira-v3-openapi.json`.
+
 ## Tooling notes
 
 - Run `cargo fmt` after code changes.

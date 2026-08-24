@@ -118,6 +118,26 @@ pub enum JiraError {
 // Get Issue
 // ----------------------------------------------------------------
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateIssueRequest {
+    pub fields: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateIssueResponse {
+    pub id: String,
+    pub key: String,
+    #[serde(rename = "self")]
+    pub self_link: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateIssueRequest {
+    pub issue_id_or_key: String,
+    pub fields: BTreeMap<String, Value>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GetIssueRequest {
     pub issue_id_or_key: String,
@@ -242,6 +262,116 @@ pub struct ListBoardIssuesResponse<F = Value> {
     pub is_last: Option<bool>,
     #[serde(default)]
     pub issues: Vec<IssueResponse<F>>,
+}
+
+// ----------------------------------------------------------------
+// Create/Edit Metadata
+// ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GetCreateMetaRequest {
+    pub project_key: String,
+    pub issue_type_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetCreateMetaResponse {
+    #[serde(default)]
+    pub projects: Vec<CreateMetaProjectResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMetaProjectResponse {
+    pub id: Option<String>,
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub issuetypes: Vec<CreateMetaIssueTypeResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMetaIssueTypeResponse {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub subtask: bool,
+    #[serde(default)]
+    pub fields: BTreeMap<String, FieldMetadataResponse>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GetEditMetaRequest {
+    pub issue_id_or_key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetEditMetaResponse {
+    #[serde(default)]
+    pub fields: BTreeMap<String, FieldMetadataResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldMetadataResponse {
+    pub required: bool,
+    pub name: String,
+    pub key: String,
+    #[serde(default)]
+    pub operations: Vec<String>,
+    pub schema: Option<Value>,
+    #[serde(default)]
+    pub allowed_values: Vec<Value>,
+}
+
+// ----------------------------------------------------------------
+// Transitions
+// ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct GetTransitionsRequest {
+    pub issue_id_or_key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTransitionsResponse {
+    #[serde(default)]
+    pub transitions: Vec<TransitionResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionResponse {
+    pub id: String,
+    pub name: String,
+    pub to: TransitionStatusResponse,
+    #[serde(default)]
+    pub has_screen: bool,
+    pub is_global: Option<bool>,
+    pub is_initial: Option<bool>,
+    pub is_available: Option<bool>,
+    pub is_conditional: Option<bool>,
+    pub is_looped: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionStatusResponse {
+    pub id: Option<String>,
+    pub name: String,
+    pub status_category: Option<TransitionStatusCategoryResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionStatusCategoryResponse {
+    pub key: Option<String>,
+    pub name: String,
 }
 
 // ----------------------------------------------------------------

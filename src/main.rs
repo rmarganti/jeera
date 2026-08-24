@@ -30,8 +30,9 @@ fn run() -> Result<(), error::AppError> {
     let settings =
         config::Settings::load().map_err(|source| error::AppError::LoadConfig { source })?;
 
+    let mutations_enabled = settings.mutations_enabled;
     let jira_client_config = settings.into_jira_client_config();
     let client = client::JiraClient::new(jira_client_config);
 
-    commands::run(&client, cli.command)
+    commands::run(&client, cli.command, mutations_enabled)
 }

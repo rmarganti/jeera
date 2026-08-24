@@ -8,7 +8,11 @@ pub mod metadata;
 pub mod search;
 pub mod show;
 
-pub fn run(client: &JiraClient, command: Command) -> Result<(), AppError> {
+pub fn run(client: &JiraClient, command: Command, mutations_enabled: bool) -> Result<(), AppError> {
+    if command.is_mutation() && !mutations_enabled {
+        return Err(AppError::MutationsDisabled);
+    }
+
     match command {
         Command::Boards(args) => boards::run(client, &args),
         Command::Search(args) => search::run(client, &args),

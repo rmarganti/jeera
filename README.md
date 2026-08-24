@@ -16,6 +16,7 @@ Jira CLI for listing boards, searching issues, viewing issue details, inspecting
 {
   "base_url": "https://your-domain.atlassian.net",
   "http_timeout_seconds": 30,
+  "mutations_enabled": false,
   "default_board_id": 215,
   "auth": {
     "type": "basic",
@@ -42,6 +43,7 @@ Jira CLI for listing boards, searching issues, viewing issue details, inspecting
 - `base_url`: absolute `http` or `https` Jira base URL
 - `auth`: `basic` or `bearer`
 - `http_timeout_seconds`: optional, defaults to `30`
+- `mutations_enabled`: optional, defaults to `false`; a human must manually set this to `true` before mutation commands can run
 - `default_board_id`: optional board id used by commands such as `jeera search`, `jeera show-create-meta`, and `jeera create` when `--board`/`--project` is omitted
 - `searches`: optional map of saved search profiles for `jeera search --profile <NAME>`
 
@@ -178,7 +180,7 @@ Human output includes summary, status, type, priority, assignee, reporter, creat
 
 ### `jeera create`
 
-Create a Jira issue. Creation is CLI-first: use flags for fields, and use `--body-file` only when the description/body is long.
+Create a Jira issue. Mutation commands are disabled by default. Before this command can run, a human must manually set `"mutations_enabled": true` in the jeera config. Creation is CLI-first: use flags for fields, and use `--body-file` only when the description/body is long.
 
 ```sh
 jeera create --project GCCDEV --type Task --summary "Add homes intake validation" [OPTIONS]

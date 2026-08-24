@@ -25,6 +25,12 @@ pub enum Command {
     ShowTransitions(ShowTransitionsArgs),
 }
 
+impl Command {
+    pub fn is_mutation(&self) -> bool {
+        matches!(self, Self::Create(_))
+    }
+}
+
 impl Cli {
     pub fn parse_with_guidance() -> Self {
         Self::try_parse_with_guidance_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
@@ -352,6 +358,26 @@ mod tests {
             }
             other => panic!("expected search command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn classifies_only_mutating_commands_as_mutations() {
+        let create = Cli::parse_from([
+            "jeera",
+            "create",
+            "--project",
+            "GCCDEV",
+            "--type",
+            "Task",
+            "--summary",
+            "Demo",
+        ]);
+        let show = Cli::parse_from(["jeera", "show", "GCCDEV-1"]);
+        let metadata = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-1"]);
+
+        assert!(create.command.is_mutation());
+        assert!(!show.command.is_mutation());
+        assert!(!metadata.command.is_mutation());
     }
 
     #[test]

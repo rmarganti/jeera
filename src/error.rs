@@ -6,6 +6,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error(
+        "mutation commands are disabled; a human must manually set `mutations_enabled` to `true` in the jeera config before proceeding"
+    )]
+    MutationsDisabled,
+
     #[error("while loading config: {source}")]
     LoadConfig { source: ConfigError },
 

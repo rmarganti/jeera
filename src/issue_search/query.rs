@@ -257,7 +257,7 @@ mod tests {
     fn board_search_defaults_to_rank_asc() {
         let prepared = prepare_with_board_source_for_args(
             &SearchArgs {
-                component: vec!["QQMS".to_string()],
+                component: vec!["BACKEND".to_string()],
                 ..Default::default()
             },
             Some(215),
@@ -271,7 +271,7 @@ mod tests {
 
         assert_eq!(
             prepared.jql(),
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"BACKEND\" ORDER BY Rank ASC"
         );
     }
 
@@ -290,7 +290,7 @@ mod tests {
     fn explicit_sort_still_defaults_to_desc_for_non_rank_fields() {
         let prepared = prepare_with_board_source_for_args(
             &SearchArgs {
-                component: vec!["QQMS".to_string()],
+                component: vec!["BACKEND".to_string()],
                 sort: Some("updated".to_string()),
                 ..Default::default()
             },
@@ -305,7 +305,7 @@ mod tests {
 
         assert_eq!(
             prepared.jql(),
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY updated DESC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"BACKEND\" ORDER BY updated DESC"
         );
     }
 
@@ -407,7 +407,7 @@ mod tests {
     fn explicit_desc_flips_board_default_rank_sort_to_desc() {
         let prepared = prepare_with_board_source_for_args(
             &SearchArgs {
-                component: vec!["QQMS".to_string()],
+                component: vec!["BACKEND".to_string()],
                 desc: true,
                 ..Default::default()
             },
@@ -422,7 +422,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank DESC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"BACKEND\" ORDER BY Rank DESC"
         );
     }
 
@@ -430,21 +430,21 @@ mod tests {
     fn raw_jql_can_be_combined_with_explicit_filters() {
         let args = SearchArgs {
             jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
-            component: vec!["QQMS".to_string()],
+            component: vec!["BACKEND".to_string()],
             ..Default::default()
         };
         let prepared = prepare_without_board(&args);
 
         assert_eq!(
             prepared.request().jql,
-            "(project = SAMPLE) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND component = \"BACKEND\" ORDER BY Rank ASC"
         );
     }
 
     #[test]
     fn board_filter_is_just_another_jql_clause() {
         let args = SearchArgs {
-            component: vec!["QQMS".to_string()],
+            component: vec!["BACKEND".to_string()],
             ..Default::default()
         };
         let prepared = prepare_with_board_source_for_args(
@@ -460,7 +460,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"BACKEND\" ORDER BY Rank ASC"
         );
     }
 
@@ -468,7 +468,7 @@ mod tests {
     fn final_jql_keeps_board_derived_clauses_when_combining_with_raw_jql() {
         let args = SearchArgs {
             jql: Some("project = SAMPLE ORDER BY Rank ASC".to_string()),
-            component: vec!["QQMS".to_string()],
+            component: vec!["BACKEND".to_string()],
             ..Default::default()
         };
         let prepared = prepare_with_board_source_for_args(
@@ -484,7 +484,7 @@ mod tests {
 
         assert_eq!(
             prepared.jql(),
-            "(project = SAMPLE) AND filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND filter = 10492 AND (fixVersion is EMPTY) AND component = \"BACKEND\" ORDER BY Rank ASC"
         );
     }
 
@@ -494,7 +494,7 @@ mod tests {
             project: Some("SAMPLE".to_string()),
             assignee: Some("me".to_string()),
             status: vec!["In Progress".to_string(), "Ready \"Soon\"".to_string()],
-            component: vec!["QQMS".to_string()],
+            component: vec!["BACKEND".to_string()],
             text: Some("reporting".to_string()),
             open: true,
             ..Default::default()
@@ -503,7 +503,7 @@ mod tests {
 
         assert_eq!(
             prepared.request().jql,
-            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
+            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"BACKEND\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
         );
     }
 }

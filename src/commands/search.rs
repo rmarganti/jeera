@@ -114,7 +114,7 @@ mod tests {
         let client = test_client(base_url);
         let args = SearchArgs {
             project: Some("SAMPLE".to_string()),
-            component: vec!["QQMS".to_string()],
+            component: vec!["BACKEND".to_string()],
             limit: Some(1),
             ..Default::default()
         };
@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(String::from_utf8(stderr).unwrap(), "");
         assert_eq!(
             String::from_utf8(stdout).unwrap(),
-            "No issues found.\nNext page token: next token\nNext page command: jeera search --project SAMPLE --component QQMS --limit 1 --next-page-token 'next token'\n"
+            "No issues found.\nNext page token: next token\nNext page command: jeera search --project SAMPLE --component BACKEND --limit 1 --next-page-token 'next token'\n"
         );
     }
 }

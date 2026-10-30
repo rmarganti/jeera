@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn prepares_friendly_fields_and_clear_operations() {
         let prepared = prepare(&UpdateArgs {
-            issue_key: "GCCDEV-1".to_string(),
+            issue_key: "SAMPLE-1".to_string(),
             summary: Some("New summary".to_string()),
             body: Some("New body".to_string()),
             component: Some(vec!["Homes".to_string()]),
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn rejects_an_update_without_changes() {
         let error = prepare(&UpdateArgs {
-            issue_key: "GCCDEV-1".to_string(),
+            issue_key: "SAMPLE-1".to_string(),
             ..Default::default()
         })
         .unwrap_err();

@@ -311,7 +311,7 @@ mod tests {
         let prepared = prepare(
             &client,
             &CreateArgs {
-                project: Some("GCCDEV".to_string()),
+                project: Some("SAMPLE".to_string()),
                 issue_type: "Task".to_string(),
                 summary: "Create homes intake validation".to_string(),
                 body: Some("First line\nSecond line".to_string()),
@@ -325,7 +325,7 @@ mod tests {
         .unwrap();
 
         let fields = &prepared.request().fields;
-        assert_eq!(fields["project"]["key"], "GCCDEV");
+        assert_eq!(fields["project"]["key"], "SAMPLE");
         assert_eq!(fields["issuetype"]["name"], "Task");
         assert_eq!(fields["summary"], "Create homes intake validation");
         assert_eq!(fields["components"][0]["name"], "Homes");

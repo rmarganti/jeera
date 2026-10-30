@@ -56,9 +56,9 @@ Profiles let you preconfigure common `search` filters in config and then overrid
   "base_url": "https://your-domain.atlassian.net",
   "default_board_id": 215,
   "searches": {
-    "qqms": {
-      "project": "GCCDEV",
-      "component": ["QQMS"],
+    "backend": {
+      "project": "SAMPLE",
+      "component": ["BACKEND"],
       "open": true,
       "sort": "rank",
       "asc": true,
@@ -95,8 +95,8 @@ Examples:
 
 ```sh
 jeera boards
-jeera boards --project GCCDEV
-jeera boards --project GCCDEV --json
+jeera boards --project SAMPLE
+jeera boards --project SAMPLE --json
 ```
 
 Human output includes board id, board type, and the best available project/location label.
@@ -150,14 +150,14 @@ Examples:
 
 ```sh
 jeera search reporting
-jeera search --profile qqms
-jeera search --profile qqms --status 'In Progress'
+jeera search --profile backend
+jeera search --profile backend --status 'In Progress'
 jeera search --assignee me --open
 jeera search --board 215 --columns key,type,status,assignee,updated,summary --limit 5
-jeera search --board 'GCCDEV Kanban Board' --limit 5
+jeera search --board 'SAMPLE Kanban Board' --limit 5
 jeera search --board 215 --sort rank --desc --limit 5
-jeera search --project GCCDEV --component QQMS --debug-jql
-jeera search --jql 'project = GCCDEV' --status 'In Progress' --json
+jeera search --project SAMPLE --component BACKEND --debug-jql
+jeera search --jql 'project = SAMPLE' --status 'In Progress' --json
 ```
 
 ### `jeera show`
@@ -171,9 +171,9 @@ jeera show <ISSUE_KEY> [--comments] [--json]
 Examples:
 
 ```sh
-jeera show GCCDEV-123
-jeera show GCCDEV-123 --comments
-jeera show GCCDEV-123 --comments --json
+jeera show SAMPLE-123
+jeera show SAMPLE-123 --comments
+jeera show SAMPLE-123 --comments --json
 ```
 
 Human output includes summary, status, type, priority, assignee, reporter, created/updated timestamps, components, description, and optional comments.
@@ -183,7 +183,7 @@ Human output includes summary, status, type, priority, assignee, reporter, creat
 Create a Jira issue. Mutation commands are disabled by default. Before this command can run, a human must manually set `"mutations_enabled": true` in the jeera config. Creation is CLI-first: use flags for fields, and use `--body-file` only when the description/body is long.
 
 ```sh
-jeera create --project GCCDEV --type Task --summary "Add homes intake validation" [OPTIONS]
+jeera create --project SAMPLE --type Task --summary "Add homes intake validation" [OPTIONS]
 jeera create --board 215 --type Spike --summary "Discover source" --body-file ./body.md
 ```
 
@@ -206,8 +206,8 @@ Before creating, jeera loads Jira create metadata for the resolved project and i
 Examples:
 
 ```sh
-jeera create --project GCCDEV --type Task --summary "Add homes intake validation" --body-file ./ticket-body.md --component Homes --label homes-2 --dry-run
-jeera create --board 'GCCDEV Kanban Board' --type Spike --summary "Discover canonical market source" --body "Identify the canonical source."
+jeera create --project SAMPLE --type Task --summary "Add homes intake validation" --body-file ./ticket-body.md --component Homes --label homes-2 --dry-run
+jeera create --board 'SAMPLE Kanban Board' --type Spike --summary "Discover canonical market source" --body "Identify the canonical source."
 ```
 
 ### `jeera update`
@@ -215,9 +215,9 @@ jeera create --board 'GCCDEV Kanban Board' --type Spike --summary "Discover cano
 Update an existing Jira issue through friendly field flags. Mutation commands are disabled by default and require `"mutations_enabled": true` in the jeera config. Omitted fields remain unchanged; repeated component and label values replace the corresponding collection.
 
 ```sh
-jeera update GCCDEV-123 --summary "Clarify homes intake validation"
-jeera update GCCDEV-123 --body-file ./ticket-body.md --component Homes --label homes-2
-jeera update GCCDEV-123 --clear-body --clear-labels
+jeera update SAMPLE-123 --summary "Clarify homes intake validation"
+jeera update SAMPLE-123 --body-file ./ticket-body.md --component Homes --label homes-2
+jeera update SAMPLE-123 --clear-body --clear-labels
 ```
 
 Options:
@@ -239,7 +239,7 @@ Before updating, jeera loads edit metadata and verifies that every requested fie
 Show Jira create metadata, including available issue types and required fields. If `--project` is omitted, jeera can derive the project from `--board` or the configured `default_board_id`.
 
 ```sh
-jeera show-create-meta [--project GCCDEV | --board 215] [--type Task] [--json]
+jeera show-create-meta [--project SAMPLE | --board 215] [--type Task] [--json]
 jeera show-create-meta
 ```
 
@@ -248,7 +248,7 @@ jeera show-create-meta
 Show editable fields for an existing issue.
 
 ```sh
-jeera show-edit-meta GCCDEV-123 [--json]
+jeera show-edit-meta SAMPLE-123 [--json]
 ```
 
 ### `jeera show-transitions`
@@ -256,5 +256,5 @@ jeera show-edit-meta GCCDEV-123 [--json]
 Show available workflow transitions for an existing issue.
 
 ```sh
-jeera show-transitions GCCDEV-123 [--json]
+jeera show-transitions SAMPLE-123 [--json]
 ```

@@ -490,7 +490,7 @@ mod tests {
                 ..Default::default()
             },
             SearchArgs {
-                component: vec!["QQMS".to_string(), "\t".to_string()],
+                component: vec!["BACKEND".to_string(), "\t".to_string()],
                 ..Default::default()
             },
             SearchArgs {

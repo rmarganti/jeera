@@ -607,10 +607,10 @@ mod tests {
             },
         );
         settings.searches.insert(
-            "qqms".to_string(),
+            "backend".to_string(),
             SearchProfileSettings {
                 project: Some("SAMPLE".to_string()),
-                component: vec!["QQMS".to_string()],
+                component: vec!["BACKEND".to_string()],
                 limit: Some(25),
                 ..Default::default()
             },
@@ -619,9 +619,9 @@ mod tests {
         let settings = settings.validate().unwrap();
 
         assert_eq!(settings.searches.len(), 1);
-        let profile = settings.searches.get("qqms").unwrap();
+        let profile = settings.searches.get("backend").unwrap();
         assert_eq!(profile.project.as_deref(), Some("SAMPLE"));
-        assert_eq!(profile.component, vec!["QQMS"]);
+        assert_eq!(profile.component, vec!["BACKEND"]);
         assert_eq!(profile.limit, Some(25));
     }
 
@@ -635,7 +635,7 @@ mod tests {
             },
         );
         settings.searches.insert(
-            "qqms".to_string(),
+            "backend".to_string(),
             SearchProfileSettings {
                 asc: true,
                 desc: true,

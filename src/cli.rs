@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, error::ErrorKind};
     name = "jeera",
     about = "Jira CLI for finding, viewing, creating, and updating issues",
     long_about = "List Jira boards, search issues, view issue details, and perform explicitly enabled mutations. Commands are task-oriented: use `search` to find issues and `show` to view one issue.",
-    after_help = "Examples:\n  jeera boards\n  jeera search --assignee me --open\n  jeera show GCCDEV-123"
+    after_help = "Examples:\n  jeera boards\n  jeera search --assignee me --open\n  jeera show SAMPLE-123"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -303,7 +303,7 @@ mod tests {
 
         assert!(rendered.contains("Commands are task-oriented"));
         assert!(rendered.contains("jeera search --assignee me --open"));
-        assert!(rendered.contains("jeera show GCCDEV-123"));
+        assert!(rendered.contains("jeera show SAMPLE-123"));
     }
 
     #[test]
@@ -381,7 +381,7 @@ mod tests {
             "jeera",
             "search",
             "--profile",
-            "qqms",
+            "backend",
             "--sort",
             "rank",
             "--desc",
@@ -390,7 +390,7 @@ mod tests {
 
         match cli.command {
             Command::Search(args) => {
-                assert_eq!(args.profile.as_deref(), Some("qqms"));
+                assert_eq!(args.profile.as_deref(), Some("backend"));
                 assert_eq!(args.sort.as_deref(), Some("rank"));
                 assert!(args.desc);
                 assert_eq!(args.query.as_deref(), Some("demo"));
@@ -405,15 +405,15 @@ mod tests {
             "jeera",
             "create",
             "--project",
-            "GCCDEV",
+            "SAMPLE",
             "--type",
             "Task",
             "--summary",
             "Demo",
         ]);
-        let update = Cli::parse_from(["jeera", "update", "GCCDEV-1", "--summary", "Demo"]);
-        let show = Cli::parse_from(["jeera", "show", "GCCDEV-1"]);
-        let metadata = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-1"]);
+        let update = Cli::parse_from(["jeera", "update", "SAMPLE-1", "--summary", "Demo"]);
+        let show = Cli::parse_from(["jeera", "show", "SAMPLE-1"]);
+        let metadata = Cli::parse_from(["jeera", "show-edit-meta", "SAMPLE-1"]);
 
         assert!(create.command.is_mutation());
         assert!(update.command.is_mutation());
@@ -427,7 +427,7 @@ mod tests {
             "jeera",
             "create",
             "--project",
-            "GCCDEV",
+            "SAMPLE",
             "--type",
             "Task",
             "--summary",
@@ -445,7 +445,7 @@ mod tests {
 
         match cli.command {
             Command::Create(args) => {
-                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.project.as_deref(), Some("SAMPLE"));
                 assert_eq!(args.issue_type, "Task");
                 assert_eq!(args.summary, "Add homes intake validation");
                 assert_eq!(args.body_file.as_deref(), Some("body.md"));
@@ -463,7 +463,7 @@ mod tests {
         let cli = Cli::parse_from([
             "jeera",
             "update",
-            "GCCDEV-1",
+            "SAMPLE-1",
             "--summary",
             "Updated",
             "--component",
@@ -476,7 +476,7 @@ mod tests {
 
         match cli.command {
             Command::Update(args) => {
-                assert_eq!(args.issue_key, "GCCDEV-1");
+                assert_eq!(args.issue_key, "SAMPLE-1");
                 assert_eq!(args.summary.as_deref(), Some("Updated"));
                 assert_eq!(args.component, Some(vec!["Homes".to_string()]));
                 assert!(args.clear_labels);
@@ -493,23 +493,23 @@ mod tests {
             "jeera",
             "show-create-meta",
             "--project",
-            "GCCDEV",
+            "SAMPLE",
             "--type",
             "Task",
         ]);
         match cli.command {
             Command::ShowCreateMeta(args) => {
-                assert_eq!(args.project.as_deref(), Some("GCCDEV"));
+                assert_eq!(args.project.as_deref(), Some("SAMPLE"));
                 assert_eq!(args.issue_type.as_deref(), Some("Task"));
             }
             other => panic!("expected show-create-meta command, got {other:?}"),
         }
 
-        let cli = Cli::parse_from(["jeera", "show-create-meta", "--board", "GCCDEV Board"]);
+        let cli = Cli::parse_from(["jeera", "show-create-meta", "--board", "SAMPLE Board"]);
         match cli.command {
             Command::ShowCreateMeta(args) => {
                 assert_eq!(args.project, None);
-                assert_eq!(args.board.as_deref(), Some("GCCDEV Board"));
+                assert_eq!(args.board.as_deref(), Some("SAMPLE Board"));
             }
             other => panic!("expected show-create-meta command, got {other:?}"),
         }
@@ -523,15 +523,15 @@ mod tests {
             other => panic!("expected show-create-meta command, got {other:?}"),
         }
 
-        let cli = Cli::parse_from(["jeera", "show-edit-meta", "GCCDEV-6902"]);
+        let cli = Cli::parse_from(["jeera", "show-edit-meta", "SAMPLE-6902"]);
         match cli.command {
-            Command::ShowEditMeta(args) => assert_eq!(args.issue_key, "GCCDEV-6902"),
+            Command::ShowEditMeta(args) => assert_eq!(args.issue_key, "SAMPLE-6902"),
             other => panic!("expected show-edit-meta command, got {other:?}"),
         }
 
-        let cli = Cli::parse_from(["jeera", "show-transitions", "GCCDEV-6902"]);
+        let cli = Cli::parse_from(["jeera", "show-transitions", "SAMPLE-6902"]);
         match cli.command {
-            Command::ShowTransitions(args) => assert_eq!(args.issue_key, "GCCDEV-6902"),
+            Command::ShowTransitions(args) => assert_eq!(args.issue_key, "SAMPLE-6902"),
             other => panic!("expected show-transitions command, got {other:?}"),
         }
     }

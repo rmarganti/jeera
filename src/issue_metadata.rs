@@ -454,7 +454,7 @@ mod tests {
         let prepared = prepare_show_create_meta(
             &client,
             &ShowCreateMetaArgs {
-                project: Some("GCCDEV".to_string()),
+                project: Some("SAMPLE".to_string()),
                 board: None,
                 issue_type: Some("Task".to_string()),
                 json: false,
@@ -462,7 +462,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(prepared.request.project_key, "GCCDEV");
+        assert_eq!(prepared.request.project_key, "SAMPLE");
         assert_eq!(prepared.request.issue_type_name.as_deref(), Some("Task"));
         assert_eq!(prepared.project_source, ProjectSource::ExplicitProject);
     }

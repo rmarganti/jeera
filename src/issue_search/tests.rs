@@ -12,10 +12,10 @@ fn execute_exposes_effective_intent_and_expands_continuation_from_it() {
     let (base_url, rx) = spawn_server("200 OK", body);
     let mut searches = BTreeMap::new();
     searches.insert(
-        "qqms".to_string(),
+        "backend".to_string(),
         SearchProfileSettings {
             project: Some("SAMPLE".to_string()),
-            component: vec!["QQMS".to_string()],
+            component: vec!["BACKEND".to_string()],
             limit: Some(25),
             ..Default::default()
         },
@@ -31,7 +31,7 @@ fn execute_exposes_effective_intent_and_expands_continuation_from_it() {
         searches,
     });
     let intent = SearchIntent::try_from(&SearchArgs {
-        profile: Some("qqms".to_string()),
+        profile: Some("backend".to_string()),
         ..Default::default()
     })
     .unwrap();
@@ -43,7 +43,7 @@ fn execute_exposes_effective_intent_and_expands_continuation_from_it() {
         execution.effective_intent().project.as_deref(),
         Some("SAMPLE")
     );
-    assert_eq!(execution.effective_intent().component, vec!["QQMS"]);
+    assert_eq!(execution.effective_intent().component, vec!["BACKEND"]);
     assert_eq!(execution.effective_intent().limit, Some(25));
     assert_eq!(
         execution.continuation().unwrap().next_page_token(),
@@ -54,6 +54,6 @@ fn execute_exposes_effective_intent_and_expands_continuation_from_it() {
     super::render_human(&mut rendered, &execution).unwrap();
     assert_eq!(
         String::from_utf8(rendered).unwrap(),
-        "No issues found.\nNext page token: next token\nNext page command: jeera search --project SAMPLE --component QQMS --limit 25 --next-page-token 'next token'\n"
+        "No issues found.\nNext page token: next token\nNext page command: jeera search --project SAMPLE --component BACKEND --limit 25 --next-page-token 'next token'\n"
     );
 }

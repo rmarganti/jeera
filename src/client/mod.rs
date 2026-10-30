@@ -664,7 +664,7 @@ mod tests {
         );
         let request = ListBoardIssuesRequest {
             board_id: 215,
-            jql: Some("component = \"QQMS\"".to_string()),
+            jql: Some("component = \"BACKEND\"".to_string()),
             max_results: Some(2),
             start_at: Some(10),
             fields: vec!["summary".to_string(), "status".to_string()],
@@ -677,7 +677,7 @@ mod tests {
         assert_eq!(captured.method, "GET");
         assert_eq!(
             captured.path,
-            "/rest/agile/1.0/board/215/issue?jql=component+%3D+%22QQMS%22&maxResults=2&startAt=10&fields=summary%2Cstatus"
+            "/rest/agile/1.0/board/215/issue?jql=component+%3D+%22BACKEND%22&maxResults=2&startAt=10&fields=summary%2Cstatus"
         );
         assert!(headers.contains("accept: application/json"));
         assert!(headers.contains("authorization: bearer secret-token"));

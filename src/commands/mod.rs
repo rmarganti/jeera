@@ -47,7 +47,7 @@ mod tests {
             searches: BTreeMap::new(),
         });
         let command = Command::Update(UpdateArgs {
-            issue_key: "GCCDEV-1".to_string(),
+            issue_key: "SAMPLE-1".to_string(),
             summary: Some("Updated".to_string()),
             ..Default::default()
         });

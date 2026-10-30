@@ -243,12 +243,12 @@ mod tests {
     fn raw_jql_can_be_combined_with_structured_clauses() {
         let mut query = Query::new();
         query.push(Clause::raw("project = SAMPLE"));
-        query.push(Clause::field_in("component", vec!["QQMS".to_string()]));
+        query.push(Clause::field_in("component", vec!["BACKEND".to_string()]));
         query.order_by(Order::field("Rank", SortDirection::Asc));
 
         assert_eq!(
             query.to_jql(),
-            "(project = SAMPLE) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "(project = SAMPLE) AND component = \"BACKEND\" ORDER BY Rank ASC"
         );
     }
 
@@ -264,14 +264,14 @@ mod tests {
             "status",
             vec!["In Progress".to_string(), "Ready \"Soon\"".to_string()],
         ));
-        query.push(Clause::field_in("component", vec!["QQMS".to_string()]));
+        query.push(Clause::field_in("component", vec!["BACKEND".to_string()]));
         query.push(Clause::field_matches("text", "reporting"));
         query.push(Clause::raw("statusCategory != Done"));
         query.order_by(Order::field("updated", SortDirection::Desc));
 
         assert_eq!(
             query.to_jql(),
-            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"QQMS\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
+            "project = \"SAMPLE\" AND assignee = currentUser() AND status in (\"In Progress\", \"Ready \\\"Soon\\\"\") AND component = \"BACKEND\" AND text ~ \"reporting\" AND (statusCategory != Done) ORDER BY updated DESC"
         );
     }
 

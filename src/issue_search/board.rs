@@ -97,7 +97,7 @@ mod tests {
         let prepared = prepare_with_board_source_for_args(
             &SearchArgs {
                 board: Some("SAMPLE Kanban Board".to_string()),
-                component: vec!["QQMS".to_string()],
+                component: vec!["BACKEND".to_string()],
                 ..Default::default()
             },
             None,
@@ -114,7 +114,7 @@ mod tests {
 
         assert_eq!(
             prepared.jql(),
-            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"QQMS\" ORDER BY Rank ASC"
+            "filter = 10492 AND (fixVersion is EMPTY) AND component = \"BACKEND\" ORDER BY Rank ASC"
         );
     }
 

@@ -16,6 +16,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Manage the Jira token stored in the macOS Keychain
+    Auth(AuthArgs),
     Boards(BoardsArgs),
     Search(Box<SearchArgs>),
     Show(ShowArgs),
@@ -56,6 +58,21 @@ impl Cli {
 
         Self::try_parse_from(args)
     }
+}
+
+#[derive(Debug, Args)]
+pub struct AuthArgs {
+    #[command(subcommand)]
+    pub command: AuthCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuthCommand {
+    /// Store or replace the Jira token in the macOS Keychain.
+    ///
+    /// Prompts without echoing when run in a terminal; otherwise reads the token from stdin
+    /// (e.g. `pbpaste | jeera auth set-token`).
+    SetToken,
 }
 
 #[derive(Debug, Args, Default)]
@@ -304,6 +321,18 @@ mod tests {
         assert!(rendered.contains("Commands are task-oriented"));
         assert!(rendered.contains("jeera search --assignee me --open"));
         assert!(rendered.contains("jeera show SAMPLE-123"));
+    }
+
+    #[test]
+    fn auth_set_token_parses() {
+        let cli = Cli::parse_from(["jeera", "auth", "set-token"]);
+
+        assert!(matches!(
+            cli.command,
+            Command::Auth(AuthArgs {
+                command: AuthCommand::SetToken
+            })
+        ));
     }
 
     #[test]

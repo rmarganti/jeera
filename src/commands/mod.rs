@@ -2,6 +2,7 @@ use crate::cli::Command;
 use crate::client::JiraClient;
 use crate::error::AppError;
 
+pub mod auth;
 pub mod boards;
 pub mod create;
 pub mod metadata;
@@ -15,6 +16,7 @@ pub fn run(client: &JiraClient, command: Command, mutations_enabled: bool) -> Re
     }
 
     match command {
+        Command::Auth(_) => unreachable!("auth commands are dispatched before loading settings"),
         Command::Boards(args) => boards::run(client, &args),
         Command::Search(args) => search::run(client, &args),
         Command::Show(args) => show::run(client, &args),

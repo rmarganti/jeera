@@ -1,5 +1,6 @@
 use crate::client::types::JiraError;
 use crate::config::ConfigError;
+use crate::keychain::KeychainError;
 use serde_json::Error as SerdeJsonError;
 use std::num::ParseIntError;
 use thiserror::Error;
@@ -13,6 +14,15 @@ pub enum AppError {
 
     #[error("while loading config: {source}")]
     LoadConfig { source: ConfigError },
+
+    #[error("while reading the token to store: {source}")]
+    ReadToken { source: std::io::Error },
+
+    #[error("no token provided")]
+    EmptyToken,
+
+    #[error("while storing the token in the Keychain: {source}")]
+    StoreToken { source: KeychainError },
 
     #[error("invalid boards: {reason}")]
     InvalidBoards { reason: String },

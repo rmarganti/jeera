@@ -14,21 +14,25 @@ pub const SERVICE: &str = "jeera";
 
 #[derive(Debug, Error)]
 pub enum KeychainError {
+    #[cfg(any(target_os = "macos", test))]
     #[error("access to the jeera Keychain entry was denied")]
     Denied,
 
+    #[cfg(target_os = "macos")]
     #[error(
         "the Keychain could not ask for approval in this session (it may be locked, or there is no GUI, e.g. over SSH); set JEERA_API_TOKEN instead"
     )]
     InteractionNotAllowed,
 
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg(not(target_os = "macos"))]
     #[error("the macOS Keychain is not available on this platform; set JEERA_API_TOKEN instead")]
     Unsupported,
 
+    #[cfg(target_os = "macos")]
     #[error("the token stored in the Keychain is not valid UTF-8")]
     InvalidUtf8,
 
+    #[cfg(target_os = "macos")]
     #[error("Keychain error: {message}")]
     Other { message: String },
 }

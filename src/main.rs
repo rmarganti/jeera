@@ -12,6 +12,7 @@ mod issue_search;
 mod issue_show;
 mod issue_update;
 mod jql;
+mod keychain;
 mod render;
 
 use std::process::ExitCode;
@@ -28,6 +29,11 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), error::AppError> {
     let cli = cli::Cli::parse_with_guidance();
+
+    // Auth commands manage the stored token, so they must not try to resolve one first.
+    if let cli::Command::Auth(args) = cli.command {
+        return commands::auth::run(args);
+    }
 
     let settings =
         config::Settings::load().map_err(|source| error::AppError::LoadConfig { source })?;

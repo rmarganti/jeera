@@ -1,5 +1,6 @@
 use crate::client::JiraAuth;
 use crate::client::JiraClientConfig;
+use crate::keychain::{self, KeychainError};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::env;
@@ -52,11 +53,28 @@ pub struct SearchProfileSettings {
     pub desc: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+/// Resolved auth credentials. Tokens come from `JEERA_API_TOKEN`, the macOS Keychain, or
+/// (deprecated) plaintext in the config file — see [`TokenSource`].
 pub enum AuthSettings {
     Basic { email: String, api_token: String },
     Bearer { token: String },
+}
+
+/// Where the resolved token came from, in lookup order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenSource {
+    Env,
+    Keychain,
+    ConfigFile,
+}
+
+/// Env var that overrides any stored token.
+pub const TOKEN_ENV_VAR: &str = "JEERA_API_TOKEN";
+
+/// What `jeera auth set-token` needs from the config without resolving a token.
+pub struct AuthTarget {
+    pub keychain_account: String,
+    pub has_plaintext_token: bool,
 }
 
 // ----------------------------------------------------------------
@@ -69,9 +87,17 @@ pub enum ConfigError {
     ConfigDirectoryNotFound,
 
     #[error(
-        "config file not found at {path}\n\nCreate it with:\n{{\n  \"base_url\": \"https://your-domain.atlassian.net\",\n  \"http_timeout_seconds\": 30,\n  \"auth\": {{\n    \"type\": \"basic\",\n    \"email\": \"you@example.com\",\n    \"api_token\": \"<jira-api-token>\"\n  }}\n}}\n\nOr set JEERA_CONFIG=/path/to/settings.json"
+        "config file not found at {path}\n\nCreate it with:\n{{\n  \"base_url\": \"https://your-domain.atlassian.net\",\n  \"http_timeout_seconds\": 30,\n  \"auth\": {{\n    \"type\": \"basic\",\n    \"email\": \"you@example.com\"\n  }}\n}}\n\nThen store your token in the macOS Keychain with:\n  jeera auth set-token\n\nOr set JEERA_CONFIG=/path/to/settings.json"
     )]
     MissingFile { path: PathBuf },
+
+    #[error(
+        "no Jira token found for {account}\n\nStore one in the macOS Keychain with:\n  jeera auth set-token\n\nOr set {TOKEN_ENV_VAR}"
+    )]
+    MissingToken { account: String },
+
+    #[error("while reading the Jira token from the Keychain: {source}")]
+    Keychain { source: KeychainError },
 
     #[error("failed to read {path}: {source}", path = .path.display())]
     ReadFailed {
@@ -143,27 +169,25 @@ impl fmt::Debug for AuthSettings {
 impl Settings {
     pub fn load() -> Result<Self, ConfigError> {
         let path = settings_path()?;
-        Self::load_from_path(&path)
-    }
+        let raw = load_raw(&path)?;
+        let has_plaintext_token = raw.auth.plaintext_token().is_some();
 
-    fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
-        let raw = fs::read_to_string(path).map_err(|source| match source.kind() {
-            std::io::ErrorKind::NotFound => ConfigError::MissingFile {
-                path: path.to_path_buf(),
-            },
-            _ => ConfigError::ReadFailed {
-                path: path.to_path_buf(),
-                source,
-            },
-        })?;
+        let (settings, source) =
+            raw.validate_with(|key| env::var(key).ok(), keychain::get_token)?;
 
-        let settings: RawSettings =
-            serde_json::from_str(&raw).map_err(|source| ConfigError::ParseFailed {
-                path: path.to_path_buf(),
-                source,
-            })?;
+        match (source, has_plaintext_token) {
+            (TokenSource::ConfigFile, _) => eprintln!(
+                "warning: reading the Jira token from plaintext in {} is deprecated; run `jeera auth set-token` and remove it from the config",
+                path.display()
+            ),
+            (_, true) => eprintln!(
+                "warning: {} still contains a plaintext Jira token that is no longer used; remove it",
+                path.display()
+            ),
+            _ => {}
+        }
 
-        settings.validate()
+        Ok(settings)
     }
 
     pub fn into_jira_client_config(self) -> JiraClientConfig {
@@ -182,6 +206,39 @@ impl Settings {
     }
 }
 
+/// Read just enough config to manage the stored token. Never touches the Keychain.
+pub fn load_auth_target() -> Result<AuthTarget, ConfigError> {
+    let raw = load_raw(&settings_path()?)?;
+    let base_url = validate_base_url(&raw.base_url)?;
+
+    Ok(AuthTarget {
+        keychain_account: keychain_account(&base_url),
+        has_plaintext_token: raw.auth.plaintext_token().is_some(),
+    })
+}
+
+fn load_raw(path: &Path) -> Result<RawSettings, ConfigError> {
+    let raw = fs::read_to_string(path).map_err(|source| match source.kind() {
+        std::io::ErrorKind::NotFound => ConfigError::MissingFile {
+            path: path.to_path_buf(),
+        },
+        _ => ConfigError::ReadFailed {
+            path: path.to_path_buf(),
+            source,
+        },
+    })?;
+
+    serde_json::from_str(&raw).map_err(|source| ConfigError::ParseFailed {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Keychain entries are keyed by the normalized base URL so several Jira sites can coexist.
+fn keychain_account(base_url: &Url) -> String {
+    base_url.as_str().to_string()
+}
+
 // ----------------------------------------------------------------
 // Raw config model (pre-validation)
 // ----------------------------------------------------------------
@@ -197,26 +254,128 @@ struct RawSettings {
     default_board_id: Option<u64>,
     #[serde(default)]
     searches: BTreeMap<String, SearchProfileSettings>,
-    auth: AuthSettings,
+    auth: RawAuthSettings,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RawAuthSettings {
+    Basic {
+        email: String,
+        #[serde(default)]
+        api_token: Option<String>,
+    },
+    Bearer {
+        #[serde(default)]
+        token: Option<String>,
+    },
+}
+
+impl fmt::Debug for RawAuthSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Basic { email, .. } => f.debug_struct("Basic").field("email", email).finish(),
+            Self::Bearer { .. } => f.debug_struct("Bearer").finish_non_exhaustive(),
+        }
+    }
+}
+
+impl RawAuthSettings {
+    /// The deprecated plaintext token from the config file, if a non-blank one is set.
+    fn plaintext_token(&self) -> Option<&str> {
+        let token = match self {
+            Self::Basic { api_token, .. } => api_token.as_deref(),
+            Self::Bearer { token } => token.as_deref(),
+        };
+        token.filter(|token| !token.trim().is_empty())
+    }
 }
 
 impl RawSettings {
-    fn validate(self) -> Result<Settings, ConfigError> {
+    fn validate_with<E, K>(
+        self,
+        getenv: E,
+        keychain_lookup: K,
+    ) -> Result<(Settings, TokenSource), ConfigError>
+    where
+        E: Fn(&str) -> Option<String>,
+        K: Fn(&str) -> Result<Option<String>, KeychainError>,
+    {
         let base_url = validate_base_url(&self.base_url)?;
-        validate_auth(&self.auth)?;
         let http_timeout = validate_http_timeout(self.http_timeout_seconds)?;
-
         validate_searches(&self.searches)?;
 
-        Ok(Settings {
-            base_url,
-            auth: self.auth,
-            http_timeout,
-            mutations_enabled: self.mutations_enabled,
-            default_board_id: self.default_board_id,
-            searches: self.searches,
-        })
+        if let RawAuthSettings::Basic { email, .. } = &self.auth
+            && email.trim().is_empty()
+        {
+            return Err(ConfigError::InvalidAuth {
+                reason: "basic auth requires a non-empty email",
+            });
+        }
+
+        let account = keychain_account(&base_url);
+        let (token, source) = resolve_token(
+            self.auth.plaintext_token(),
+            &account,
+            getenv,
+            keychain_lookup,
+        )?;
+
+        let auth = match self.auth {
+            RawAuthSettings::Basic { email, .. } => AuthSettings::Basic {
+                email,
+                api_token: token,
+            },
+            RawAuthSettings::Bearer { .. } => AuthSettings::Bearer { token },
+        };
+
+        Ok((
+            Settings {
+                base_url,
+                auth,
+                http_timeout,
+                mutations_enabled: self.mutations_enabled,
+                default_board_id: self.default_board_id,
+                searches: self.searches,
+            },
+            source,
+        ))
     }
+}
+
+/// Resolve the token: `JEERA_API_TOKEN`, then the Keychain, then plaintext config.
+///
+/// A missing Keychain entry falls through silently. Any other Keychain failure (denied,
+/// no GUI to prompt) is an error rather than a silent fallback, so a denial is never
+/// papered over by a stale plaintext token.
+fn resolve_token<E, K>(
+    config_token: Option<&str>,
+    account: &str,
+    getenv: E,
+    keychain_lookup: K,
+) -> Result<(String, TokenSource), ConfigError>
+where
+    E: Fn(&str) -> Option<String>,
+    K: Fn(&str) -> Result<Option<String>, KeychainError>,
+{
+    let non_blank = |token: String| (!token.trim().is_empty()).then_some(token);
+
+    if let Some(token) = getenv(TOKEN_ENV_VAR).and_then(non_blank) {
+        return Ok((token, TokenSource::Env));
+    }
+
+    let stored = keychain_lookup(account).map_err(|source| ConfigError::Keychain { source })?;
+    if let Some(token) = stored.and_then(non_blank) {
+        return Ok((token, TokenSource::Keychain));
+    }
+
+    if let Some(token) = config_token {
+        return Ok((token.to_string(), TokenSource::ConfigFile));
+    }
+
+    Err(ConfigError::MissingToken {
+        account: account.to_string(),
+    })
 }
 
 // ----------------------------------------------------------------
@@ -276,33 +435,6 @@ fn validate_http_timeout(value: u64) -> Result<Duration, ConfigError> {
     }
 
     Ok(Duration::from_secs(value))
-}
-
-fn validate_auth(auth: &AuthSettings) -> Result<(), ConfigError> {
-    match auth {
-        AuthSettings::Basic { email, api_token } => {
-            if email.trim().is_empty() {
-                return Err(ConfigError::InvalidAuth {
-                    reason: "basic auth requires a non-empty email",
-                });
-            }
-
-            if api_token.trim().is_empty() {
-                return Err(ConfigError::InvalidAuth {
-                    reason: "basic auth requires a non-empty api_token",
-                });
-            }
-        }
-        AuthSettings::Bearer { token } => {
-            if token.trim().is_empty() {
-                return Err(ConfigError::InvalidAuth {
-                    reason: "bearer auth requires a non-empty token",
-                });
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn validate_searches(
@@ -366,7 +498,11 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn raw_settings(base_url: &str, http_timeout_seconds: u64, auth: AuthSettings) -> RawSettings {
+    fn raw_settings(
+        base_url: &str,
+        http_timeout_seconds: u64,
+        auth: RawAuthSettings,
+    ) -> RawSettings {
         RawSettings {
             base_url: base_url.to_string(),
             http_timeout_seconds,
@@ -375,6 +511,140 @@ mod tests {
             searches: BTreeMap::new(),
             auth,
         }
+    }
+
+    fn bearer(token: &str) -> RawAuthSettings {
+        RawAuthSettings::Bearer {
+            token: Some(token.to_string()),
+        }
+    }
+
+    fn basic(email: &str, api_token: &str) -> RawAuthSettings {
+        RawAuthSettings::Basic {
+            email: email.to_string(),
+            api_token: Some(api_token.to_string()),
+        }
+    }
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    fn empty_keychain(_: &str) -> Result<Option<String>, KeychainError> {
+        Ok(None)
+    }
+
+    impl RawSettings {
+        /// Validate with no env override and an empty Keychain, so the config token is used.
+        fn validate_without_stores(self) -> Result<Settings, ConfigError> {
+            self.validate_with(no_env, empty_keychain)
+                .map(|(settings, _)| settings)
+        }
+    }
+
+    fn token_of(settings: &Settings) -> &str {
+        match &settings.auth {
+            AuthSettings::Basic { api_token, .. } => api_token,
+            AuthSettings::Bearer { token } => token,
+        }
+    }
+
+    #[test]
+    fn env_token_overrides_keychain_and_config() {
+        let (settings, source) = raw_settings("https://example.atlassian.net", 30, bearer("file"))
+            .validate_with(
+                |key| (key == TOKEN_ENV_VAR).then(|| "from-env".to_string()),
+                |_| panic!("keychain should not be consulted when the env var is set"),
+            )
+            .unwrap();
+
+        assert_eq!(source, TokenSource::Env);
+        assert_eq!(token_of(&settings), "from-env");
+    }
+
+    #[test]
+    fn blank_env_token_is_ignored() {
+        let (_, source) = raw_settings("https://example.atlassian.net", 30, bearer("file"))
+            .validate_with(|_| Some("  ".to_string()), empty_keychain)
+            .unwrap();
+
+        assert_eq!(source, TokenSource::ConfigFile);
+    }
+
+    #[test]
+    fn keychain_token_is_looked_up_by_normalized_base_url() {
+        let auth = RawAuthSettings::Basic {
+            email: "you@example.com".to_string(),
+            api_token: None,
+        };
+        let (settings, source) = raw_settings(" https://example.atlassian.net ", 30, auth)
+            .validate_with(no_env, |account| {
+                assert_eq!(account, "https://example.atlassian.net/");
+                Ok(Some("from-keychain".to_string()))
+            })
+            .unwrap();
+
+        assert_eq!(source, TokenSource::Keychain);
+        assert_eq!(token_of(&settings), "from-keychain");
+    }
+
+    #[test]
+    fn keychain_token_wins_over_plaintext_config() {
+        let (settings, source) = raw_settings("https://example.atlassian.net", 30, bearer("file"))
+            .validate_with(no_env, |_| Ok(Some("from-keychain".to_string())))
+            .unwrap();
+
+        assert_eq!(source, TokenSource::Keychain);
+        assert_eq!(token_of(&settings), "from-keychain");
+    }
+
+    #[test]
+    fn falls_back_to_plaintext_config_token() {
+        let (settings, source) = raw_settings("https://example.atlassian.net", 30, bearer("file"))
+            .validate_with(no_env, empty_keychain)
+            .unwrap();
+
+        assert_eq!(source, TokenSource::ConfigFile);
+        assert_eq!(token_of(&settings), "file");
+    }
+
+    #[test]
+    fn missing_token_everywhere_explains_how_to_store_one() {
+        let auth = RawAuthSettings::Bearer {
+            token: Some(" ".to_string()),
+        };
+        let error = raw_settings("https://example.atlassian.net", 30, auth)
+            .validate_without_stores()
+            .unwrap_err();
+        let rendered = error.to_string();
+
+        assert!(matches!(error, ConfigError::MissingToken { .. }));
+        assert!(rendered.contains("jeera auth set-token"));
+        assert!(rendered.contains(TOKEN_ENV_VAR));
+    }
+
+    #[test]
+    fn keychain_failure_is_an_error_not_a_silent_fallback() {
+        let error = raw_settings("https://example.atlassian.net", 30, bearer("file"))
+            .validate_with(no_env, |_| Err(KeychainError::Denied))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigError::Keychain {
+                source: KeychainError::Denied
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_auth_without_a_plaintext_token() {
+        let raw: RawSettings = serde_json::from_str(
+            r#"{"base_url":"https://example.atlassian.net","auth":{"type":"basic","email":"you@example.com"}}"#,
+        )
+        .unwrap();
+
+        assert!(raw.auth.plaintext_token().is_none());
     }
 
     #[test]
@@ -415,11 +685,9 @@ mod tests {
         let settings = raw_settings(
             " https://example.atlassian.net/ ",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         )
-        .validate()
+        .validate_without_stores()
         .unwrap();
 
         assert_eq!(settings.base_url.as_str(), "https://example.atlassian.net/");
@@ -430,11 +698,9 @@ mod tests {
         let settings = raw_settings(
             "https://example.atlassian.net/jira",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         )
-        .validate()
+        .validate_without_stores()
         .unwrap();
 
         assert_eq!(
@@ -456,12 +722,9 @@ mod tests {
         let error = raw_settings(
             "https://example.atlassian.net",
             default_http_timeout_seconds(),
-            AuthSettings::Basic {
-                email: " ".to_string(),
-                api_token: "secret".to_string(),
-            },
+            basic(" ", "secret"),
         )
-        .validate()
+        .validate_without_stores()
         .unwrap_err();
 
         assert!(matches!(error, ConfigError::InvalidAuth { .. }));
@@ -472,11 +735,9 @@ mod tests {
         let error = raw_settings(
             "jira-relative-path",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         )
-        .validate()
+        .validate_without_stores()
         .unwrap_err();
 
         assert!(matches!(error, ConfigError::InvalidBaseUrl { .. }));
@@ -487,12 +748,9 @@ mod tests {
         let settings = raw_settings(
             "https://example.atlassian.net",
             default_http_timeout_seconds(),
-            AuthSettings::Basic {
-                email: "you@example.com".to_string(),
-                api_token: "secret-token".to_string(),
-            },
+            basic("you@example.com", "secret-token"),
         )
-        .validate()
+        .validate_without_stores()
         .unwrap();
 
         let debug = format!("{settings:?}");
@@ -508,7 +766,7 @@ mod tests {
             .as_nanos();
         let path = env::temp_dir().join(format!("jeera-missing-{unique}.json"));
 
-        let error = Settings::load_from_path(&path).unwrap_err();
+        let error = load_raw(&path).unwrap_err();
         let rendered = error.to_string();
 
         assert!(matches!(error, ConfigError::MissingFile { .. }));
@@ -530,7 +788,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = Settings::load_from_path(&path).unwrap_err();
+        let error = load_raw(&path).unwrap_err();
         let rendered = error.to_string();
 
         assert!(matches!(error, ConfigError::ParseFailed { .. }));
@@ -544,11 +802,9 @@ mod tests {
         let settings = raw_settings(
             "https://example.atlassian.net",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         )
-        .validate()
+        .validate_without_stores()
         .unwrap();
 
         assert_eq!(settings.http_timeout, Duration::from_secs(30));
@@ -562,7 +818,7 @@ mod tests {
         }"#;
 
         let settings: RawSettings = serde_json::from_str(raw).unwrap();
-        let settings = settings.validate().unwrap();
+        let settings = settings.validate_without_stores().unwrap();
 
         assert!(!settings.mutations_enabled);
     }
@@ -576,7 +832,7 @@ mod tests {
         }"#;
 
         let settings: RawSettings = serde_json::from_str(raw).unwrap();
-        let settings = settings.validate().unwrap();
+        let settings = settings.validate_without_stores().unwrap();
 
         assert!(settings.mutations_enabled);
     }
@@ -586,13 +842,11 @@ mod tests {
         let mut settings = raw_settings(
             "https://example.atlassian.net",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         );
         settings.default_board_id = Some(215);
 
-        let settings = settings.validate().unwrap();
+        let settings = settings.validate_without_stores().unwrap();
 
         assert_eq!(settings.default_board_id, Some(215));
     }
@@ -602,9 +856,7 @@ mod tests {
         let mut settings = raw_settings(
             "https://example.atlassian.net",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         );
         settings.searches.insert(
             "backend".to_string(),
@@ -616,7 +868,7 @@ mod tests {
             },
         );
 
-        let settings = settings.validate().unwrap();
+        let settings = settings.validate_without_stores().unwrap();
 
         assert_eq!(settings.searches.len(), 1);
         let profile = settings.searches.get("backend").unwrap();
@@ -630,9 +882,7 @@ mod tests {
         let mut settings = raw_settings(
             "https://example.atlassian.net",
             default_http_timeout_seconds(),
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
+            bearer("secret"),
         );
         settings.searches.insert(
             "backend".to_string(),
@@ -643,37 +893,25 @@ mod tests {
             },
         );
 
-        let error = settings.validate().unwrap_err();
+        let error = settings.validate_without_stores().unwrap_err();
 
         assert!(matches!(error, ConfigError::InvalidSearchProfile { .. }));
     }
 
     #[test]
     fn accepts_custom_http_timeout() {
-        let settings = raw_settings(
-            "https://example.atlassian.net",
-            7,
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
-        )
-        .validate()
-        .unwrap();
+        let settings = raw_settings("https://example.atlassian.net", 7, bearer("secret"))
+            .validate_without_stores()
+            .unwrap();
 
         assert_eq!(settings.http_timeout, Duration::from_secs(7));
     }
 
     #[test]
     fn rejects_zero_http_timeout() {
-        let error = raw_settings(
-            "https://example.atlassian.net",
-            0,
-            AuthSettings::Bearer {
-                token: "secret".to_string(),
-            },
-        )
-        .validate()
-        .unwrap_err();
+        let error = raw_settings("https://example.atlassian.net", 0, bearer("secret"))
+            .validate_without_stores()
+            .unwrap_err();
 
         assert!(matches!(error, ConfigError::InvalidHttpTimeout { .. }));
     }

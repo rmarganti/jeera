@@ -20,8 +20,7 @@ Jira CLI for listing boards, searching issues, viewing issue details, inspecting
   "default_board_id": 215,
   "auth": {
     "type": "basic",
-    "email": "you@example.com",
-    "api_token": "<jira-api-token>"
+    "email": "you@example.com"
   }
 }
 ```
@@ -32,11 +31,33 @@ Jira CLI for listing boards, searching issues, viewing issue details, inspecting
 {
   "base_url": "https://your-domain.atlassian.net",
   "auth": {
-    "type": "bearer",
-    "token": "<token>"
+    "type": "bearer"
   }
 }
 ```
+
+### Storing the token
+
+Store your Jira token in the macOS login Keychain:
+
+```sh
+jeera auth set-token                 # prompts without echoing
+pbpaste | jeera auth set-token       # or pipe it in
+```
+
+The entry uses service `jeera` and your normalized `base_url` (e.g. `https://your-domain.atlassian.net/`) as the account. Running `set-token` again replaces it.
+
+jeera looks for a token in this order:
+
+1. `JEERA_API_TOKEN` env var (use this on Linux, in CI, over SSH, or in remote agent sessions)
+2. The macOS Keychain
+3. `api_token` / `token` in `settings.json` (deprecated; prints a warning)
+
+#### Keychain approval and coding agents
+
+The entry created by `jeera auth set-token` trusts only the jeera binary that created it. That binary reads the token silently, including when a coding agent runs it. Any other program, such as `security find-generic-password`, gets a macOS approval dialog. You'll also get one after reinstalling or rebuilding jeera, because the binary's signature changes. Choose **Always Allow** to trust the new binary. While the dialog is open, the command waits. If the session can't show a dialog (e.g. over SSH), the lookup fails and jeera tells you to use `JEERA_API_TOKEN`.
+
+To approve individual agent calls, use your agent's command permissions (e.g. don't allowlist `jeera` in Claude Code), not the Keychain.
 
 ### Config fields
 
@@ -66,8 +87,7 @@ Profiles let you preconfigure common `search` filters in config and then overrid
     }
   },
   "auth": {
-    "type": "bearer",
-    "token": "<token>"
+    "type": "bearer"
   }
 }
 ```
